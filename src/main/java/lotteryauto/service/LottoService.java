@@ -479,84 +479,87 @@ public class LottoService {
         try {
             log.info("마이페이지에서 예치금 확인 중...");
 
-            // 페이지 로드 대기
-            Thread.sleep(3000);
-
+            // 1. 현재 URL 및 세션 상태 확인
             JavascriptExecutor js = (JavascriptExecutor) webDriver;
-            String balanceText = null;
+            String currentUrl = webDriver.getCurrentUrl();
+            log.info("현재 URL: {}", currentUrl);
+            
+            Object loginCheck = js.executeScript("return typeof isLoggedIn !== 'undefined' ? isLoggedIn : 'unknown';");
+            log.info("로그인 세션 상태(isLoggedIn): {}", loginCheck);
 
-            // 방법 1: 사이트 내부 API (getUserMndp) 호출
-            log.info("방법 1: getUserMndp API 호출 시도...");
-            try {
-                webDriver.manage().timeouts().scriptTimeout(java.time.Duration.ofSeconds(10));
-                Object result = js.executeAsyncScript(
-                    "var cb = arguments[arguments.length - 1];" +
-                    "if (typeof cmmUtil !== 'undefined' && typeof cmmUtil.getUserMndp === 'function') {" +
-                    "  cmmUtil.getUserMndp(function(d) {" +
-                    "    if (d) cb((d.totalAmt || d.crntEntrsAmt || 0).toString());" +
-                    "    else cb('0');" +
-                    "  });" +
-                    "} else {" +
-                    "  cb(null);" +
-                    "}"
+            // 2. 데이터 로딩 대기 (값이 0에서 다른 숫자로 바뀔 때까지 최대 5초 대기)
+            log.info("예치금 데이터 로딩 대기 중...");
+            String balanceText = "0";
+            for (int i = 0; i < 10; i++) {
+                Object val = js.executeScript(
+                    "var el = document.getElementById('totalAmt') || document.getElementById('divCrntEntrsAmt');" +
+                    "return el ? (el.textContent || el.innerText).replace(/[^0-9]/g, '') : '0';"
                 );
-                if (result != null) {
-                    balanceText = result.toString();
-                    log.info("방법 1 결과: {}원", balanceText);
+                balanceText = (val != null) ? val.toString() : "0";
+                
+                if (balanceText != null && !balanceText.isEmpty() && !balanceText.equals("0")) {
+                    log.info("{}회차 시도만에 잔액 확인 성공: {}원", i + 1, balanceText);
+                    break;
                 }
-            } catch (Exception e) {
-                log.warn("방법 1 실패: {}", e.getMessage());
+                Thread.sleep(500); // 0.5초씩 재시도
             }
 
-            // 방법 2: DOM 요소에서 직접 추출 (방법 1 실패 시)
-            if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
-                log.info("방법 2: DOM 요소 직접 추출 시도...");
+            // 3. 방법 1: 직접 API 호출 (실패 시 무시)
+            if (balanceText.equals("0")) {
+                log.info("방법 1: getUserMndp API 호출 시도...");
                 try {
-                    Object result = js.executeScript(
-                        "var ids = ['totalAmt', 'divCrntEntrsAmt', 'navTotalAmt', 'tooltipTotalAmt'];" +
-                        "for (var i=0; i<ids.length; i++) {" +
-                        "  var el = document.getElementById(ids[i]);" +
-                        "  if (el) {" +
-                        "    var val = el.textContent || el.innerText || '';" +
-                        "    val = val.replace(/[^0-9]/g, '');" +
-                        "    if (val && val !== '0') return val;" +
-                        "  }" +
-                        "}" +
-                        "return '0';"
+                    webDriver.manage().timeouts().scriptTimeout(java.time.Duration.ofSeconds(5));
+                    Object result = js.executeAsyncScript(
+                        "var cb = arguments[arguments.length - 1];" +
+                        "if (typeof cmmUtil !== 'undefined' && typeof cmmUtil.getUserMndp === 'function') {" +
+                        "  cmmUtil.getUserMndp(function(d) {" +
+                        "    if (d) cb((d.totalAmt || d.crntEntrsAmt || 0).toString());" +
+                        "    else cb('0');" +
+                        "  });" +
+                        "} else cb('0');"
                     );
-                    if (result != null) {
+                    if (result != null && !result.toString().equals("0")) {
                         balanceText = result.toString();
-                        log.info("방법 2 결과: {}원", balanceText);
+                        log.info("API 호출 결과: {}원", balanceText);
                     }
                 } catch (Exception e) {
-                    log.warn("방법 2 실패: {}", e.getMessage());
+                    log.warn("API 호출 실패 또는 타임아웃: {}", e.getMessage());
                 }
             }
 
-            // 방법 3: 페이지 소스 정규식 파싱 (최후 수단)
-            if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
-                log.info("방법 3: 페이지 소스 정규식 파싱 시도...");
-                String source = webDriver.getPageSource();
-                java.util.regex.Pattern p = java.util.regex.Pattern.compile("id=\"(?:totalAmt|divCrntEntrsAmt)\"[^>]*>([0-9,]+)");
-                java.util.regex.Matcher m = p.matcher(source);
-                if (m.find()) {
-                    balanceText = m.group(1);
-                    log.info("방법 3 결과: {}원", balanceText);
+            // 4. 방법 2: 모든 가능한 텍스트 훑기 (여전히 0인 경우)
+            if (balanceText.equals("0")) {
+                log.info("방법 2: 페이지 내 '원' 키워드 주변 텍스트 훑기...");
+                Object result = js.executeScript(
+                    "var texts = [];" +
+                    "var elements = document.querySelectorAll('span, div, p, strong');" +
+                    "for (var i=0; i<elements.length; i++) {" +
+                    "  var t = elements[i].textContent || '';" +
+                    "  if (t.includes('원') && /[0-9,]+/.test(t)) {" +
+                    "    var num = t.replace(/[^0-9]/g, '');" +
+                    "    if (num.length >= 4) texts.push(parseInt(num));" +
+                    "  }" +
+                    "}" +
+                    "return texts.length > 0 ? Math.max.apply(null, texts).toString() : '0';"
+                );
+                if (result != null && !result.toString().equals("0")) {
+                    balanceText = result.toString();
+                    log.info("텍스트 검색 결과: {}원", balanceText);
                 }
             }
 
             // 최종 정수 변환
-            String cleaned = (balanceText != null) ? balanceText.replaceAll("[^0-9]", "") : "0";
+            String cleaned = balanceText.replaceAll("[^0-9]", "");
             if (cleaned.isEmpty()) cleaned = "0";
             
             int balance = Integer.parseInt(cleaned);
-            log.info("✅ 예치금 확인 완료: {}원", balance);
+            log.info("✅ 예치금 확인 최종 완료: {}원", balance);
             
             return balance;
 
         } catch (Exception e) {
             log.error("예치금 확인 중 치명적 오류: {}", e.getMessage());
-            return 0; // 오류 발생 시 안전하게 0 반환 (이후 로직에서 잔액 부족으로 처리됨)
+            return 0;
         }
     }
 
