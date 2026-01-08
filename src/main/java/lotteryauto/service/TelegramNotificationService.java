@@ -5,9 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import lotteryauto.config.LotteryConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 
 /**
  * Telegram Bot API를 사용한 알림 서비스
@@ -38,13 +38,18 @@ public class TelegramNotificationService {
         try {
             String botToken = lotteryConfig.getTelegramBotToken();
             String chatId = lotteryConfig.getTelegramChatId();
-            String encodedMessage = URLEncoder.encode(message, StandardCharsets.UTF_8);
             
-            String url = String.format("%s%s/sendMessage?chat_id=%s&text=%s",
-                    TELEGRAM_API_BASE_URL, botToken, chatId, encodedMessage);
+            // POST 요청으로 변경하여 URL 인코딩 문제 해결
+            String url = String.format("%s%s/sendMessage", TELEGRAM_API_BASE_URL, botToken);
+            
+            // form-urlencoded 형식으로 전송 (자동 인코딩 처리)
+            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+            formData.add("chat_id", chatId);
+            formData.add("text", message);
 
-            webClient.get()
+            webClient.post()
                     .uri(url)
+                    .body(BodyInserters.fromFormData(formData))
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
