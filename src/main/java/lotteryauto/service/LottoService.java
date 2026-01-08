@@ -86,25 +86,35 @@ public class LottoService {
             // 6. RSA 암호화 수행 및 hidden 필드에 설정
             encryptAndSetCredentials(userId, userPw);
 
-            // 7. 로그인 폼 제출 (JavaScript로 직접)
-            Thread.sleep(500); // 암호화 완료 대기
-            js.executeScript("document.getElementById('loginForm').submit();");
-            log.info("JavaScript로 로그인 폼 제출 완료");
+            // 7. 로그인 버튼 클릭 (JavaScript로 실제 버튼 클릭 트리거)
+            log.info("로그인 버튼 클릭 시도...");
+            Thread.sleep(1000); // 암호화 완료 및 안정화 대기
+            
+            // submit() 대신 실제 버튼을 클릭하여 브라우저 세션 처리가 정상적으로 이루어지도록 함
+            js.executeScript(
+                "var btn = document.getElementById('btnLogin') || document.querySelector('.btn_login') || document.querySelector('a.btn_common.lrg.blu');" +
+                "if (btn) btn.click();" +
+                "else document.getElementById('loginForm').submit();" // 버튼 못 찾을 경우만 최후의 수단으로 submit
+            );
+            log.info("로그인 액션 실행 완료");
 
-            // 7. 로그인 완료 대기 (페이지 이동 또는 로그인 결과 확인)
-            // 페이지가 로드되거나 URL이 변경될 때까지 대기
+            // 8. 로그인 완료 대기 (페이지 이동 및 세션 쿠키 저장 시간 확보)
+            log.info("로그인 처리 대기 중...");
             try {
+                // 로그아웃 버튼이 나타날 때까지 확실히 대기 (최대 15초)
                 webDriverWait.until(ExpectedConditions.or(
                         ExpectedConditions.urlContains("/main"),
                         ExpectedConditions.urlContains("/mypage"),
                         ExpectedConditions.presenceOfElementLocated(By.xpath("//a[contains(text(), '로그아웃')]"))
                 ));
+                log.info("로그인 후 페이지 이동 확인 완료");
+                Thread.sleep(3000); // 세션 쿠키 동기화를 위한 추가 대기
             } catch (Exception e) {
-                log.debug("페이지 이동 대기 중 타임아웃 (계속 진행): {}", e.getMessage());
-                Thread.sleep(2000); // 대체 대기
+                log.warn("로그인 후 페이지 이동 대기 중 타임아웃: {}", e.getMessage());
+                Thread.sleep(5000); // 타임아웃 시에도 충분히 대기 후 진행
             }
 
-            // 8. 로그인 성공 여부 확인
+            // 9. 로그인 성공 여부 확인
             boolean loginSuccess = verifyLogin();
 
             if (loginSuccess) {
