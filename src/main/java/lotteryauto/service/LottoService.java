@@ -585,20 +585,32 @@ public class LottoService {
             closeAllPopups();
             Thread.sleep(2000);
 
-            // 2. 대기열 또는 구매한도 초과 확인
-            String source = webDriver.getPageSource();
-            if (source.contains("서비스연결 대기중")) {
-                log.info("⏳ 접속 대기열 발견... 잠시 대기합니다.");
-                webDriverWait.until(ExpectedConditions.invisibilityOfElementLocated(By.xpath("//*[contains(text(), '서비스연결 대기중')]")));
+            // 2. 대기열 확인 (실제로 보이는 경우에만)
+            try {
+                List<WebElement> queueElements = webDriver.findElements(By.xpath("//*[contains(text(), '서비스연결 대기중')]"));
+                if (!queueElements.isEmpty() && queueElements.get(0).isDisplayed()) {
+                    log.info("⏳ 접속 대기열 발견... 사라질 때까지 대기합니다.");
+                    webDriverWait.until(ExpectedConditions.invisibilityOf(queueElements.get(0)));
+                    log.info("✅ 대기열 해제됨");
+                    Thread.sleep(1000);
+                }
+            } catch (Exception e) {
+                log.debug("대기열 확인 중 예외 발생 (무시): {}", e.getMessage());
             }
             
-            if (source.contains("구매한도 5천원을 모두 채우셨습니다")) {
-                log.error("❌ 이미 이번 주 로또 구매 한도를 초과했습니다.");
-                telegramNotificationService.sendMessage("🚨 구매 실패: 이번 주 로또 구매 한도(5,000원)를 이미 초과했습니다.");
-                System.exit(0); // 정상 종료로 처리
+            // 3. 구매한도 초과 확인 (실제로 보이는 경우에만)
+            try {
+                List<WebElement> limitElements = webDriver.findElements(By.xpath("//*[contains(text(), '구매한도 5천원을 모두 채우셨습니다')]"));
+                if (!limitElements.isEmpty() && limitElements.get(0).isDisplayed()) {
+                    log.error("❌ 이미 이번 주 로또 구매 한도를 초과했습니다.");
+                    telegramNotificationService.sendMessage("🚨 구매 실패: 이번 주 로또 구매 한도(5,000원)를 이미 초과했습니다.");
+                    System.exit(0);
+                }
+            } catch (Exception e) {
+                log.debug("구매한도 확인 중 예외 발생 (무시): {}", e.getMessage());
             }
 
-            // 3. iframe 존재 여부 확인 (최대 5초만 대기)
+            // 4. iframe 존재 여부 확인 (최대 5초만 대기)
             log.info("iframe 존재 여부 확인 중...");
             List<WebElement> iframes = webDriver.findElements(By.id("ifrm_answer"));
             
@@ -609,7 +621,7 @@ public class LottoService {
                 log.info("ℹ️ iframe이 발견되지 않았습니다. 메인 페이지에서 직접 요소를 찾습니다.");
             }
 
-            // 4. 실제 로또 번호 선택 버튼(자동선택 등)이 나타날 때까지 대기
+            // 5. 실제 로또 번호 선택 버튼(자동선택 등)이 나타날 때까지 대기
             log.info("로또 구매 요소(자동선택 버튼) 로드 대기 중...");
             webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
             log.info("✅ 로또 구매 요소 확인 완료");
