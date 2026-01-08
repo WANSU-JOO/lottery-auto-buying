@@ -480,8 +480,18 @@ public class LottoService {
         try {
             log.info("마이페이지에서 예치금 확인 중...");
 
-            // 페이지 로드 후 JavaScript 실행 대기
-            Thread.sleep(2000);
+            // totalAmt 또는 divCrntEntrsAmt 요소가 나타날 때까지 대기
+            try {
+                webDriverWait.until(ExpectedConditions.or(
+                        ExpectedConditions.presenceOfElementLocated(By.id("totalAmt")),
+                        ExpectedConditions.presenceOfElementLocated(By.id("divCrntEntrsAmt"))
+                ));
+                log.info("예치금 요소 발견, 추가 대기 중...");
+                Thread.sleep(2000); // JavaScript가 값을 설정할 시간 확보
+            } catch (Exception e) {
+                log.warn("예치금 요소 대기 중 타임아웃, 계속 진행: {}", e.getMessage());
+                Thread.sleep(2000);
+            }
 
             String balanceText = null;
             JavascriptExecutor js = (JavascriptExecutor) webDriver;
@@ -491,33 +501,106 @@ public class LottoService {
             try {
                 String pageSource = webDriver.getPageSource();
                 
+                // 디버깅: 페이지 소스에서 관련 부분 찾기
+                int divCrntIndex = pageSource.indexOf("divCrntEntrsAmt");
+                int totalAmtIndex = pageSource.indexOf("totalAmt");
+                
+                if (divCrntIndex >= 0) {
+                    int start = Math.max(0, divCrntIndex - 50);
+                    int end = Math.min(pageSource.length(), divCrntIndex + 200);
+                    log.info("페이지 소스에서 divCrntEntrsAmt 주변: ...{}...", pageSource.substring(start, end));
+                }
+                
+                if (totalAmtIndex >= 0) {
+                    int start = Math.max(0, totalAmtIndex - 50);
+                    int end = Math.min(pageSource.length(), totalAmtIndex + 200);
+                    log.info("페이지 소스에서 totalAmt 주변: ...{}...", pageSource.substring(start, end));
+                }
+                
                 // divCrntEntrsAmt에서 값 찾기 (구매가능 금액)
-                // 예: <div class="pssbl-num" id="divCrntEntrsAmt">5,000<span class="pssbl-won">원</span></div>
-                java.util.regex.Pattern pattern1 = java.util.regex.Pattern.compile(
-                        "id=\"divCrntEntrsAmt\"[^>]*>([0-9,]+)", 
-                        java.util.regex.Pattern.DOTALL
-                );
-                java.util.regex.Matcher matcher1 = pattern1.matcher(pageSource);
-                if (matcher1.find()) {
-                    balanceText = matcher1.group(1).trim();
-                    log.info("페이지 소스에서 divCrntEntrsAmt 발견: {}", balanceText);
+                // 여러 패턴 시도
+                String[] patterns1 = {
+                        "id=\"divCrntEntrsAmt\"[^>]*>([0-9,]+)",  // 기본 패턴
+                        "id='divCrntEntrsAmt'[^>]*>([0-9,]+)",   // 작은따옴표
+                        "divCrntEntrsAmt[^>]*>([0-9,]+)",         // id 없이
+                        "\"divCrntEntrsAmt\"[^>]*>([0-9,]+)"      // 따옴표만
+                };
+                
+                for (String patternStr : patterns1) {
+                    try {
+                        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(patternStr, java.util.regex.Pattern.DOTALL);
+                        java.util.regex.Matcher matcher = pattern.matcher(pageSource);
+                        if (matcher.find()) {
+                            balanceText = matcher.group(1).trim();
+                            log.info("페이지 소스에서 divCrntEntrsAmt 발견 (패턴: {}): {}", patternStr, balanceText);
+                            break;
+                        }
+                    } catch (Exception e) {
+                        log.debug("패턴 매칭 실패 ({}): {}", patternStr, e.getMessage());
+                    }
                 }
                 
                 // totalAmt에서 값 찾기 (예치금 잔액)
-                // 예: <span class="deposit-num" id="totalAmt">5,000</span>
                 if (balanceText == null || balanceText.isEmpty()) {
-                    java.util.regex.Pattern pattern2 = java.util.regex.Pattern.compile(
-                            "id=\"totalAmt\"[^>]*>([0-9,]+)", 
-                            java.util.regex.Pattern.DOTALL
-                    );
-                    java.util.regex.Matcher matcher2 = pattern2.matcher(pageSource);
-                    if (matcher2.find()) {
-                        balanceText = matcher2.group(1).trim();
-                        log.info("페이지 소스에서 totalAmt 발견: {}", balanceText);
+                    String[] patterns2 = {
+                            "id=\"totalAmt\"[^>]*>([0-9,]+)",  // 기본 패턴
+                            "id='totalAmt'[^>]*>([0-9,]+)",   // 작은따옴표
+                            "totalAmt[^>]*>([0-9,]+)",         // id 없이
+                            "\"totalAmt\"[^>]*>([0-9,]+)"      // 따옴표만
+                    };
+                    
+                    for (String patternStr : patterns2) {
+                        try {
+                            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(patternStr, java.util.regex.Pattern.DOTALL);
+                            java.util.regex.Matcher matcher = pattern.matcher(pageSource);
+                            if (matcher.find()) {
+                                balanceText = matcher.group(1).trim();
+                                log.info("페이지 소스에서 totalAmt 발견 (패턴: {}): {}", patternStr, balanceText);
+                                break;
+                            }
+                        } catch (Exception e) {
+                            log.debug("패턴 매칭 실패 ({}): {}", patternStr, e.getMessage());
+                        }
                     }
                 }
+                
+                // 정규식으로 찾지 못한 경우, 간단한 문자열 검색 시도
+                if (balanceText == null || balanceText.isEmpty()) {
+                    log.info("정규식으로 찾지 못해 문자열 검색 시도 중...");
+                    
+                    // divCrntEntrsAmt 주변에서 숫자 찾기
+                    int idx = pageSource.indexOf("divCrntEntrsAmt");
+                    if (idx >= 0) {
+                        String snippet = pageSource.substring(Math.max(0, idx), Math.min(pageSource.length(), idx + 300));
+                        // 숫자와 콤마가 포함된 패턴 찾기
+                        java.util.regex.Pattern numPattern = java.util.regex.Pattern.compile("([0-9]{1,3}(?:,[0-9]{3})*)");
+                        java.util.regex.Matcher numMatcher = numPattern.matcher(snippet);
+                        if (numMatcher.find()) {
+                            balanceText = numMatcher.group(1);
+                            log.info("문자열 검색으로 divCrntEntrsAmt 값 발견: {}", balanceText);
+                        }
+                    }
+                    
+                    // totalAmt 주변에서 숫자 찾기
+                    if (balanceText == null || balanceText.isEmpty()) {
+                        idx = pageSource.indexOf("totalAmt");
+                        if (idx >= 0) {
+                            String snippet = pageSource.substring(Math.max(0, idx), Math.min(pageSource.length(), idx + 300));
+                            java.util.regex.Pattern numPattern = java.util.regex.Pattern.compile("([0-9]{1,3}(?:,[0-9]{3})*)");
+                            java.util.regex.Matcher numMatcher = numPattern.matcher(snippet);
+                            if (numMatcher.find()) {
+                                balanceText = numMatcher.group(1);
+                                log.info("문자열 검색으로 totalAmt 값 발견: {}", balanceText);
+                            }
+                        }
+                    }
+                }
+                
+                if (balanceText == null || balanceText.isEmpty()) {
+                    log.error("❌ 페이지 소스에서 예치금 값을 찾지 못했습니다. divCrntEntrsAmt 또는 totalAmt를 찾을 수 없습니다.");
+                }
             } catch (Exception e) {
-                log.debug("페이지 소스 파싱 실패: {}", e.getMessage());
+                log.error("페이지 소스 파싱 실패: {}", e.getMessage(), e);
             }
 
             // 방법 2: JavaScript로 DOM에서 직접 텍스트 가져오기 (textContent 사용)
