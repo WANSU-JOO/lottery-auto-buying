@@ -472,210 +472,104 @@ public class LottoService {
 
     /**
      * 마이페이지에서 예치금 금액 파싱
-     * 페이지 소스를 직접 파싱하여 값을 가져옵니다.
+     * 사이트 내부 JavaScript 함수를 직접 호출하여 가장 정확한 값을 가져옵니다.
      * 
      * @return 예치금 금액 (원, 콤마 제거된 숫자)
      */
     private int getBalanceFromMyPage() {
         try {
-            log.info("마이페이지에서 예치금 확인 중...");
+            log.info("마이페이지에서 예치금 확인 중 (직접 API 호출 방식)...");
 
-            // totalAmt 또는 divCrntEntrsAmt 요소가 나타날 때까지 대기
-            try {
-                webDriverWait.until(ExpectedConditions.or(
-                        ExpectedConditions.presenceOfElementLocated(By.id("totalAmt")),
-                        ExpectedConditions.presenceOfElementLocated(By.id("divCrntEntrsAmt"))
-                ));
-                log.info("예치금 요소 발견, 추가 대기 중...");
-                Thread.sleep(2000); // JavaScript가 값을 설정할 시간 확보
-            } catch (Exception e) {
-                log.warn("예치금 요소 대기 중 타임아웃, 계속 진행: {}", e.getMessage());
-                Thread.sleep(2000);
-            }
+            // 페이지 로드 대기
+            Thread.sleep(3000);
 
-            String balanceText = null;
             JavascriptExecutor js = (JavascriptExecutor) webDriver;
-
-            // 방법 1: 페이지 소스를 직접 파싱 (가장 확실한 방법)
-            log.info("페이지 소스에서 예치금 정보 파싱 중...");
+            
+            // 방법 1: 사이트 내부의 cmmUtil.getUserMndp 함수를 직접 호출하여 데이터 획득
+            log.info("방법 1: 사이트 내부 getUserMndp API 호출 시도...");
+            String balanceText = null;
             try {
-                String pageSource = webDriver.getPageSource();
+                // 스크립트 실행 타임아웃 설정
+                webDriver.manage().timeouts().scriptTimeout(java.time.Duration.ofSeconds(10));
                 
-                // 디버깅: 페이지 소스에서 관련 부분 찾기
-                int divCrntIndex = pageSource.indexOf("divCrntEntrsAmt");
-                int totalAmtIndex = pageSource.indexOf("totalAmt");
+                // executeAsyncScript를 사용하여 비동기 콜백 결과를 기다림
+                Object balanceObj = js.executeAsyncScript(
+                    "var callback = arguments[arguments.length - 1];" +
+                    "try {" +
+                    "  if (typeof cmmUtil !== 'undefined' && typeof cmmUtil.getUserMndp === 'function') {" +
+                    "    cmmUtil.getUserMndp(function(data) {" +
+                    "      if (data) {" +
+                    "        // totalAmt, crntEntrsAmt 중 유효한 값 반환" +
+                    "        var amt = data.totalAmt || data.crntEntrsAmt || 0;" +
+                    "        callback(amt.toString());" +
+                    "      } else {" +
+                    "        callback('0');" +
+                    "      }" +
+                    "    });" +
+                    "  } else {" +
+                    "    callback(null);" +
+                    "  }" +
+                    "} catch(e) {" +
+                    "  callback(null);" +
+                    "}"
+                );
                 
-                if (divCrntIndex >= 0) {
-                    int start = Math.max(0, divCrntIndex - 50);
-                    int end = Math.min(pageSource.length(), divCrntIndex + 200);
-                    log.info("페이지 소스에서 divCrntEntrsAmt 주변: ...{}...", pageSource.substring(start, end));
-                }
-                
-                if (totalAmtIndex >= 0) {
-                    int start = Math.max(0, totalAmtIndex - 50);
-                    int end = Math.min(pageSource.length(), totalAmtIndex + 200);
-                    log.info("페이지 소스에서 totalAmt 주변: ...{}...", pageSource.substring(start, end));
-                }
-                
-                // divCrntEntrsAmt에서 값 찾기 (구매가능 금액)
-                // 여러 패턴 시도
-                String[] patterns1 = {
-                        "id=\"divCrntEntrsAmt\"[^>]*>([0-9,]+)",  // 기본 패턴
-                        "id='divCrntEntrsAmt'[^>]*>([0-9,]+)",   // 작은따옴표
-                        "divCrntEntrsAmt[^>]*>([0-9,]+)",         // id 없이
-                        "\"divCrntEntrsAmt\"[^>]*>([0-9,]+)"      // 따옴표만
-                };
-                
-                for (String patternStr : patterns1) {
-                    try {
-                        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(patternStr, java.util.regex.Pattern.DOTALL);
-                        java.util.regex.Matcher matcher = pattern.matcher(pageSource);
-                        if (matcher.find()) {
-                            balanceText = matcher.group(1).trim();
-                            log.info("페이지 소스에서 divCrntEntrsAmt 발견 (패턴: {}): {}", patternStr, balanceText);
-                            break;
-                        }
-                    } catch (Exception e) {
-                        log.debug("패턴 매칭 실패 ({}): {}", patternStr, e.getMessage());
-                    }
-                }
-                
-                // totalAmt에서 값 찾기 (예치금 잔액)
-                if (balanceText == null || balanceText.isEmpty()) {
-                    String[] patterns2 = {
-                            "id=\"totalAmt\"[^>]*>([0-9,]+)",  // 기본 패턴
-                            "id='totalAmt'[^>]*>([0-9,]+)",   // 작은따옴표
-                            "totalAmt[^>]*>([0-9,]+)",         // id 없이
-                            "\"totalAmt\"[^>]*>([0-9,]+)"      // 따옴표만
-                    };
-                    
-                    for (String patternStr : patterns2) {
-                        try {
-                            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(patternStr, java.util.regex.Pattern.DOTALL);
-                            java.util.regex.Matcher matcher = pattern.matcher(pageSource);
-                            if (matcher.find()) {
-                                balanceText = matcher.group(1).trim();
-                                log.info("페이지 소스에서 totalAmt 발견 (패턴: {}): {}", patternStr, balanceText);
-                                break;
-                            }
-                        } catch (Exception e) {
-                            log.debug("패턴 매칭 실패 ({}): {}", patternStr, e.getMessage());
-                        }
-                    }
-                }
-                
-                // 정규식으로 찾지 못한 경우, 간단한 문자열 검색 시도
-                if (balanceText == null || balanceText.isEmpty()) {
-                    log.info("정규식으로 찾지 못해 문자열 검색 시도 중...");
-                    
-                    // divCrntEntrsAmt 주변에서 숫자 찾기
-                    int idx = pageSource.indexOf("divCrntEntrsAmt");
-                    if (idx >= 0) {
-                        String snippet = pageSource.substring(Math.max(0, idx), Math.min(pageSource.length(), idx + 300));
-                        // 숫자와 콤마가 포함된 패턴 찾기
-                        java.util.regex.Pattern numPattern = java.util.regex.Pattern.compile("([0-9]{1,3}(?:,[0-9]{3})*)");
-                        java.util.regex.Matcher numMatcher = numPattern.matcher(snippet);
-                        if (numMatcher.find()) {
-                            balanceText = numMatcher.group(1);
-                            log.info("문자열 검색으로 divCrntEntrsAmt 값 발견: {}", balanceText);
-                        }
-                    }
-                    
-                    // totalAmt 주변에서 숫자 찾기
-                    if (balanceText == null || balanceText.isEmpty()) {
-                        idx = pageSource.indexOf("totalAmt");
-                        if (idx >= 0) {
-                            String snippet = pageSource.substring(Math.max(0, idx), Math.min(pageSource.length(), idx + 300));
-                            java.util.regex.Pattern numPattern = java.util.regex.Pattern.compile("([0-9]{1,3}(?:,[0-9]{3})*)");
-                            java.util.regex.Matcher numMatcher = numPattern.matcher(snippet);
-                            if (numMatcher.find()) {
-                                balanceText = numMatcher.group(1);
-                                log.info("문자열 검색으로 totalAmt 값 발견: {}", balanceText);
-                            }
-                        }
-                    }
-                }
-                
-                if (balanceText == null || balanceText.isEmpty()) {
-                    log.error("❌ 페이지 소스에서 예치금 값을 찾지 못했습니다. divCrntEntrsAmt 또는 totalAmt를 찾을 수 없습니다.");
+                if (balanceObj != null) {
+                    balanceText = balanceObj.toString();
+                    log.info("API 호출로 잔액 확인 성공: {}원", balanceText);
                 }
             } catch (Exception e) {
-                log.error("페이지 소스 파싱 실패: {}", e.getMessage(), e);
+                log.warn("getUserMndp API 호출 실패: {}", e.getMessage());
             }
 
-            // 방법 2: JavaScript로 DOM에서 직접 텍스트 가져오기 (textContent 사용)
-            if (balanceText == null || balanceText.isEmpty()) {
-                log.info("DOM에서 직접 텍스트 조회 중...");
-                try {
-                    // divCrntEntrsAmt 시도
-                    Object balanceObj = js.executeScript(
-                            "try { " +
-                            "  var elem = document.getElementById('divCrntEntrsAmt'); " +
-                            "  if (elem) { " +
-                            "    var text = elem.textContent || elem.innerText; " +
-                            "    if (text) return text.trim(); " +
-                            "  } " +
-                            "  return null; " +
-                            "} catch(e) { return null; }"
-                    );
-                    
-                    if (balanceObj != null && !balanceObj.toString().isEmpty() && !balanceObj.toString().equals("null")) {
-                        balanceText = balanceObj.toString();
-                        log.info("DOM에서 divCrntEntrsAmt 발견: {}", balanceText);
-                    }
-                    
-                    // totalAmt 시도
-                    if (balanceText == null || balanceText.isEmpty()) {
-                        balanceObj = js.executeScript(
-                                "try { " +
-                                "  var elem = document.getElementById('totalAmt'); " +
-                                "  if (elem) { " +
-                                "    var text = elem.textContent || elem.innerText; " +
-                                "    if (text) return text.trim(); " +
-                                "  } " +
-                                "  return null; " +
-                                "} catch(e) { return null; }"
-                        );
-                        
-                        if (balanceObj != null && !balanceObj.toString().isEmpty() && !balanceObj.toString().equals("null")) {
-                            balanceText = balanceObj.toString();
-                            log.info("DOM에서 totalAmt 발견: {}", balanceText);
-                        }
-                    }
-                } catch (Exception e) {
-                    log.debug("DOM 조회 실패: {}", e.getMessage());
+            // 방법 2: DOM 요소(textContent) 직접 추출 시도 (API 호출 실패 시)
+            if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
+                log.info("방법 2: DOM 요소(textContent) 직접 추출 시도...");
+                Object balanceObj = js.executeScript(
+                    "try {" +
+                    "  var ids = ['totalAmt', 'divCrntEntrsAmt', 'tooltipTotalAmt', 'navTotalAmt', 'tooltipTotalSAmt'];" +
+                    "  for (var i = 0; i < ids.length; i++) {" +
+                    "    var el = document.getElementById(ids[i]);" +
+                    "    if (el) {" +
+                    "      var txt = (el.textContent || el.innerText || '').replace(/[^0-9]/g, '');" +
+                    "      if (txt && txt !== '0') return txt;" +
+                    "    }" +
+                    "  }" +
+                    "  // 0원인 경우라도 요소가 존재하면 0 반환" +
+                    "  var totalAmtEl = document.getElementById('totalAmt');" +
+                    "  if (totalAmtEl) return (totalAmtEl.textContent || '0').replace(/[^0-9]/g, '');" +
+                    "  return null;" +
+                    "} catch(e) { return null; }"
+                );
+                if (balanceObj != null) {
+                    balanceText = balanceObj.toString();
+                    log.info("DOM 요소에서 잔액 발견: {}", balanceText);
                 }
             }
 
-            // 여전히 찾지 못한 경우, 0원으로 처리
-            if (balanceText == null || balanceText.isEmpty()) {
-                log.warn("예치금 값을 찾을 수 없어 0원으로 처리합니다. 페이지가 완전히 로드되지 않았을 수 있습니다.");
-                balanceText = "0";
+            // 방법 3: 페이지 소스 정규식 파싱 (마지막 수단)
+            if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
+                log.info("방법 3: 페이지 소스 정규식 파싱 시도...");
+                String pageSource = webDriver.getPageSource();
+                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("id=\"(?:totalAmt|divCrntEntrsAmt)\"[^>]*>([0-9,]+)");
+                java.util.regex.Matcher matcher = pattern.matcher(pageSource);
+                if (matcher.find()) {
+                    balanceText = matcher.group(1);
+                    log.info("정규식으로 잔액 발견: {}", balanceText);
+                }
             }
 
-            // 콤마 제거 및 숫자 파싱
-            String originalText = balanceText;
-            String balanceNumber = balanceText.replaceAll("[^0-9]", "");
+            // 최종 파싱
+            String numbersOnly = (balanceText != null) ? balanceText.replaceAll("[^0-9]", "") : "0";
+            if (numbersOnly.isEmpty()) numbersOnly = "0";
             
-            log.info("예치금 파싱 전: 원본 텍스트='{}', 숫자만 추출='{}'", originalText, balanceNumber);
-            
-            if (balanceNumber.isEmpty()) {
-                balanceNumber = "0";
-                log.warn("예치금 텍스트에서 숫자를 추출할 수 없어 0원으로 처리합니다. 원본: {}", originalText);
-            }
-
-            int balance = Integer.parseInt(balanceNumber);
-            log.info("예치금 파싱 완료: {}원 (원본 텍스트: '{}', 숫자만 추출: '{}')", balance, originalText, balanceNumber);
-            
-            // 디버깅: 파싱된 값 확인
-            if (balance < MINIMUM_BALANCE) {
-                log.warn("⚠️ 파싱된 잔액이 최소 금액보다 작습니다. 파싱된 값: {}원, 최소 필요: {}원", balance, MINIMUM_BALANCE);
-            }
+            int balance = Integer.parseInt(numbersOnly);
+            log.info("✅ 최종 잔액 확인 결과: {}원", balance);
             
             return balance;
 
         } catch (Exception e) {
-            log.error("예치금 확인 중 오류 발생: {}", e.getMessage(), e);
+            log.error("예치금 확인 중 치명적 오류: {}", e.getMessage(), e);
             throw new RuntimeException("예치금 확인 실패: " + e.getMessage(), e);
         }
     }
