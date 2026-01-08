@@ -151,6 +151,11 @@
    - `TELEGRAM_TOKEN_ACCOUNT2` / `TELEGRAM_CHAT_ID_ACCOUNT2`
 4. Workflow 파일에서 해당 Secret 이름을 사용하도록 수정합니다.
 
+> 📝 **참고**: 코드는 다음 환경 변수명도 지원합니다 (하위 호환성):
+> - `LOTTERY_USERNAME` (또는 `LOTTO_ID`)
+> - `LOTTERY_PASSWORD` (또는 `LOTTO_PW`)
+> - `TELEGRAM_BOT_TOKEN` (또는 `TELEGRAM_TOKEN`)
+
 ## 🏗️ 프로젝트 구조
 
 ```

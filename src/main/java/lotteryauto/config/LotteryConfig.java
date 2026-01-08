@@ -39,12 +39,6 @@ public class LotteryConfig {
     private String telegramChatId;
 
     /**
-     * 구매할 로또 게임 수 (기본값: 1)
-     */
-    @Value("${LOTTERY_GAME_COUNT:1}")
-    private int gameCount;
-
-    /**
      * 환경 변수 유효성 검증
      */
     public boolean isValid() {

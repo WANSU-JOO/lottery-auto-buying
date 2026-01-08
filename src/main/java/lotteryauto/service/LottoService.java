@@ -30,8 +30,10 @@ public class LottoService {
 
     private static final String LOGIN_URL = "https://www.dhlottery.co.kr/login";
     private static final String MAIN_URL = "https://www.dhlottery.co.kr/main";
+    private static final String MY_PAGE_URL = "https://www.dhlottery.co.kr/mypage/home";
     private static final String LOTTO_PURCHASE_URL = "https://ol.dhlottery.co.kr/olotto/game/game645.do";
     private static final int MINIMUM_BALANCE = 5000; // 최소 잔액 (원)
+    private static final int FIXED_GAME_COUNT = 5; // 고정 구매 게임 수 (5,000원)
 
     /**
      * 로그인 처리
@@ -408,7 +410,7 @@ public class LottoService {
     }
 
     /**
-     * 메인 페이지에서 예치금 확인 및 구매 페이지 진입
+     * 마이페이지에서 예치금 확인 후 메인 페이지로 이동하여 구매 페이지 진입
      * 
      * @return 구매 페이지 진입 성공 여부
      * @throws RuntimeException 잔액 부족 시 프로그램 종료
@@ -417,8 +419,16 @@ public class LottoService {
         try {
             log.info("예치금 확인 및 구매 페이지 진입 프로세스를 시작합니다.");
 
-            // 1. 메인 페이지에서 예치금 확인
-            int balance = getBalanceFromMainPage();
+            // 1. 마이페이지로 이동하여 예치금 확인
+            log.info("마이페이지로 이동: {}", MY_PAGE_URL);
+            webDriver.get(MY_PAGE_URL);
+            webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
+            
+            // 팝업 닫기 처리
+            closeAllPopups();
+            
+            // 잔액 확인
+            int balance = getBalanceFromMyPage();
             log.info("현재 예치금: {}원", balance);
 
             // 2. 잔액이 5,000원 미만이면 알림 보내고 종료
@@ -430,15 +440,23 @@ public class LottoService {
                 return false; // 실제로는 도달하지 않음
             }
 
-            // 3. 로또 6/45 구매 페이지로 이동
+            // 3. 메인 페이지로 이동
+            log.info("메인 페이지로 이동: {}", MAIN_URL);
+            webDriver.get(MAIN_URL);
+            webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
+            
+            // 팝업 닫기 처리
+            closeAllPopups();
+
+            // 4. 로또 6/45 구매 페이지로 이동
             log.info("로또 6/45 구매 페이지로 이동: {}", LOTTO_PURCHASE_URL);
             webDriver.get(LOTTO_PURCHASE_URL);
             webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
 
-            // 4. 팝업 닫기 처리
+            // 5. 팝업 닫기 처리
             closeAllPopups();
 
-            // 5. iframe으로 전환
+            // 6. iframe으로 전환
             switchToPurchaseIframe();
 
             log.info("구매 페이지 진입 완료");
@@ -452,39 +470,39 @@ public class LottoService {
     }
 
     /**
-     * 메인 페이지에서 예치금 금액 파싱
+     * 마이페이지에서 예치금 금액 파싱
      * 
      * @return 예치금 금액 (원, 콤마 제거된 숫자)
      */
-    private int getBalanceFromMainPage() {
+    private int getBalanceFromMyPage() {
         try {
-            log.info("메인 페이지에서 예치금 확인 중...");
+            log.info("마이페이지에서 예치금 확인 중...");
 
-            // 메인 페이지가 이미 로드되어 있다고 가정
+            // 마이페이지가 이미 로드되어 있다고 가정
             // 여러 위치에서 예치금을 찾기 시도
             String balanceText = null;
 
-            // 방법 1: tooltipTotalAmt (PC 헤더 툴팁)
+            // 방법 1: totalAmt (예치금 잔액) - 우선 사용
             try {
                 WebElement balanceElement = webDriverWait.until(
-                        ExpectedConditions.presenceOfElementLocated(By.id("tooltipTotalAmt"))
+                        ExpectedConditions.presenceOfElementLocated(By.id("totalAmt"))
                 );
                 balanceText = balanceElement.getText();
-                log.debug("tooltipTotalAmt에서 예치금 발견: {}", balanceText);
+                log.debug("totalAmt에서 예치금 발견: {}", balanceText);
             } catch (Exception e) {
-                log.debug("tooltipTotalAmt에서 예치금을 찾지 못함: {}", e.getMessage());
+                log.debug("totalAmt에서 예치금을 찾지 못함: {}", e.getMessage());
             }
 
-            // 방법 2: navTotalAmt (모바일 메뉴)
+            // 방법 2: divCrntEntrsAmt (구매가능 금액) - 대체 방법
             if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
                 try {
-                    WebElement balanceElement = webDriver.findElement(By.id("navTotalAmt"));
+                    WebElement balanceElement = webDriver.findElement(By.id("divCrntEntrsAmt"));
                     if (balanceElement != null && balanceElement.isDisplayed()) {
                         balanceText = balanceElement.getText();
-                        log.debug("navTotalAmt에서 예치금 발견: {}", balanceText);
+                        log.debug("divCrntEntrsAmt에서 구매가능 금액 발견: {}", balanceText);
                     }
                 } catch (Exception e) {
-                    log.debug("navTotalAmt에서 예치금을 찾지 못함: {}", e.getMessage());
+                    log.debug("divCrntEntrsAmt에서 구매가능 금액을 찾지 못함: {}", e.getMessage());
                 }
             }
 
@@ -495,11 +513,15 @@ public class LottoService {
                     // JavaScript에서 예치금 정보를 가져오는 함수 호출 시도
                     Object balanceObj = js.executeScript(
                             "try { " +
-                            "  var elem = document.getElementById('tooltipTotalAmt') || document.getElementById('navTotalAmt'); " +
-                            "  return elem ? elem.textContent || elem.innerText : null; " +
+                            "  var elem = document.getElementById('totalAmt') || document.getElementById('divCrntEntrsAmt'); " +
+                            "  if (elem) { " +
+                            "    var text = elem.textContent || elem.innerText; " +
+                            "    return text.trim(); " +
+                            "  } " +
+                            "  return null; " +
                             "} catch(e) { return null; }"
                     );
-                    if (balanceObj != null) {
+                    if (balanceObj != null && !balanceObj.toString().isEmpty()) {
                         balanceText = balanceObj.toString();
                         log.debug("JavaScript로 예치금 발견: {}", balanceText);
                     }
@@ -508,28 +530,8 @@ public class LottoService {
                 }
             }
 
-            // 방법 4: 마이페이지 툴팁이 열려있지 않으면 클릭하여 열기
-            if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
-                try {
-                    // 마이페이지 툴팁 버튼 클릭
-                    WebElement mypageTooltip = webDriver.findElement(By.className("mypage-tooltip"));
-                    if (mypageTooltip != null && mypageTooltip.isDisplayed()) {
-                        mypageTooltip.click();
-                        Thread.sleep(1000); // 툴팁이 열릴 때까지 대기
-                        
-                        WebElement balanceElement = webDriverWait.until(
-                                ExpectedConditions.presenceOfElementLocated(By.id("tooltipTotalAmt"))
-                        );
-                        balanceText = balanceElement.getText();
-                        log.debug("툴팁 클릭 후 예치금 발견: {}", balanceText);
-                    }
-                } catch (Exception e) {
-                    log.debug("마이페이지 툴팁 클릭 실패: {}", e.getMessage());
-                }
-            }
-
             if (balanceText == null || balanceText.isEmpty()) {
-                throw new RuntimeException("예치금 정보를 찾을 수 없습니다.");
+                throw new RuntimeException("예치금 정보를 찾을 수 없습니다. 마이페이지가 정상적으로 로드되었는지 확인해주세요.");
             }
 
             // 콤마 제거 및 숫자 파싱
@@ -575,12 +577,13 @@ public class LottoService {
 
     /**
      * iframe 내부에서 로또 5게임(5,000원) 자동 구매 실행
+     * 무조건 5게임(5,000원)만 구매합니다.
      * 
      * @return 구매 성공 여부
      */
     public boolean purchaseLotto() {
         try {
-            log.info("로또 5게임(5,000원) 자동 구매 프로세스를 시작합니다.");
+            log.info("로또 {}게임(5,000원) 자동 구매 프로세스를 시작합니다. (고정 구매)", FIXED_GAME_COUNT);
 
             // iframe 내부에서 작업 (이미 전환된 상태라고 가정)
             // 만약 전환되지 않았다면 다시 전환 시도
@@ -596,16 +599,16 @@ public class LottoService {
             }
 
             // 1. 5게임 선택: 자동선택 버튼을 5번 클릭하고 확인 버튼을 5번 클릭
-            log.info("5게임 선택 시작...");
+            log.info("{}게임 선택 시작... (고정 구매)", FIXED_GAME_COUNT);
             selectFiveGames();
 
             // 2. 왼쪽 리스트에 5게임이 모두 있는지 확인
             log.info("선택된 게임 수 확인 중...");
             int selectedGameCount = verifySelectedGameCount();
-            if (selectedGameCount < 5) {
-                log.warn("선택된 게임 수가 부족합니다: {}게임 (목표: 5게임)", selectedGameCount);
+            if (selectedGameCount < FIXED_GAME_COUNT) {
+                log.warn("선택된 게임 수가 부족합니다: {}게임 (목표: {}게임)", selectedGameCount, FIXED_GAME_COUNT);
                 // 부족한 만큼 추가 선택 시도
-                int remainingGames = 5 - selectedGameCount;
+                int remainingGames = FIXED_GAME_COUNT - selectedGameCount;
                 log.info("부족한 {}게임 추가 선택 시도...", remainingGames);
                 for (int i = 0; i < remainingGames; i++) {
                     selectSingleGame();
@@ -614,11 +617,11 @@ public class LottoService {
                 selectedGameCount = verifySelectedGameCount();
             }
 
-            if (selectedGameCount < 5) {
-                throw new RuntimeException(String.format("5게임 선택 실패: 현재 %d게임만 선택됨", selectedGameCount));
+            if (selectedGameCount < FIXED_GAME_COUNT) {
+                throw new RuntimeException(String.format("%d게임 선택 실패: 현재 %d게임만 선택됨", FIXED_GAME_COUNT, selectedGameCount));
             }
 
-            log.info("5게임 선택 완료 확인: {}게임", selectedGameCount);
+            log.info("{}게임 선택 완료 확인: {}게임 (고정 구매)", FIXED_GAME_COUNT, selectedGameCount);
 
             // 3. 구매하기 버튼 클릭
             log.info("구매하기 버튼 클릭 중...");
@@ -690,10 +693,11 @@ public class LottoService {
 
     /**
      * 5게임 선택: 자동선택 버튼과 확인 버튼을 5번 반복 클릭
+     * 무조건 5게임(5,000원)만 구매합니다.
      */
     private void selectFiveGames() {
         try {
-            for (int i = 1; i <= 5; i++) {
+            for (int i = 1; i <= FIXED_GAME_COUNT; i++) {
                 log.info("게임 {} 선택 중...", i);
 
                 // 자동선택 버튼 클릭
@@ -714,12 +718,12 @@ public class LottoService {
                 log.debug("확인 버튼 클릭 완료 (게임 {})", i);
 
                 // 각 게임 선택 사이 적절한 대기 (사이트 부하 방지 및 차단 방지)
-                if (i < 5) {
+                if (i < FIXED_GAME_COUNT) {
                     Thread.sleep(800); // 마지막 게임이 아니면 대기
                 }
             }
 
-            log.info("5게임 선택 프로세스 완료");
+            log.info("{}게임 선택 프로세스 완료 (고정 구매)", FIXED_GAME_COUNT);
 
         } catch (Exception e) {
             log.error("5게임 선택 중 오류 발생: {}", e.getMessage(), e);
@@ -830,14 +834,14 @@ public class LottoService {
                 log.debug("페이지 텍스트 확인 실패: {}", e.getMessage());
             }
 
-            // 확인할 수 없는 경우, 선택 프로세스를 완료했다고 가정하고 5게임으로 반환
+            // 확인할 수 없는 경우, 선택 프로세스를 완료했다고 가정하고 고정 게임 수로 반환
             log.warn("선택된 게임 수를 정확히 확인할 수 없습니다. 선택 프로세스 완료를 가정합니다.");
-            return 5;
+            return FIXED_GAME_COUNT;
 
         } catch (Exception e) {
             log.error("게임 수 확인 중 오류: {}", e.getMessage(), e);
             // 오류 발생 시에도 선택 프로세스는 완료되었다고 가정
-            return 5;
+            return FIXED_GAME_COUNT;
         }
     }
 
@@ -1032,14 +1036,14 @@ public class LottoService {
                 log.debug("crntEntrsAmt에서 잔액 확인 실패: {}", e.getMessage());
             }
 
-            // 메인 페이지로 이동하여 잔액 확인
+            // 마이페이지로 이동하여 잔액 확인
             try {
-                webDriver.get(MAIN_URL);
+                webDriver.get(MY_PAGE_URL);
                 webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
                 closeAllPopups();
-                return getBalanceFromMainPage();
+                return getBalanceFromMyPage();
             } catch (Exception e) {
-                log.warn("메인 페이지에서 잔액 확인 실패: {}", e.getMessage());
+                log.warn("마이페이지에서 잔액 확인 실패: {}", e.getMessage());
             }
 
             // 잔액을 확인할 수 없는 경우 0 반환

@@ -2,10 +2,10 @@ name: 로또 자동 구매 (계정 1)
 
 on:
   schedule:
-    # 매주 수요일과 토요일 오후 8시 30분 (로또 추첨일 전날)
+    # 매주 토요일 오전 자동 구매
     # UTC 기준이므로 한국 시간(KST, UTC+9)으로 변환 필요
-    # 한국 시간 오후 8시 30분 = UTC 오전 11시 30분
-    - cron: '30 11 * * 3,6'  # 수요일, 토요일
+    # 한국 시간 토요일 오전 8시 30분 = UTC 금요일 23시 30분
+    - cron: '30 23 * * 5'  # UTC 기준 금요일 23:30 (한국 시간 토요일 08:30)
   workflow_dispatch:  # 수동 실행 가능
 
 jobs:
@@ -33,21 +33,20 @@ jobs:
 
       - name: 로또 자동 구매 실행
         env:
-          LOTTERY_USERNAME: ${{ secrets.LOTTERY_USERNAME }}
-          LOTTERY_PASSWORD: ${{ secrets.LOTTERY_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          LOTTO_ID: ${{ secrets.LOTTO_ID }}
+          LOTTO_PW: ${{ secrets.LOTTO_PW }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          LOTTERY_GAME_COUNT: ${{ secrets.LOTTERY_GAME_COUNT || '1' }}
         run: |
           java -jar target/lotteryauto-0.0.1-SNAPSHOT.jar
 
       - name: 실패 시 알림 (선택적)
         if: failure()
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id=${TELEGRAM_CHAT_ID} \
             -d text="❌ 로또 자동 구매 워크플로우 실패"
 
