@@ -475,33 +475,46 @@ public class LottoService {
         try {
             log.info("마이페이지에서 예치금 확인 중...");
 
-            // JavaScript로 직접 조회 (가장 안정적)
+            // 페이지 로드 후 JavaScript 실행 대기
+            Thread.sleep(2000);
+
+            // totalAmt 요소가 존재하고 값이 로드될 때까지 대기
+            // JavaScript가 비동기로 값을 설정하므로, 값이 업데이트될 때까지 대기
             String balanceText = null;
-            try {
-                JavascriptExecutor js = (JavascriptExecutor) webDriver;
-                // JavaScript에서 예치금 정보를 가져오기
-                Object balanceObj = js.executeScript(
-                        "try { " +
-                        "  var elem = document.getElementById('totalAmt'); " +
-                        "  if (elem) { " +
-                        "    var text = elem.textContent || elem.innerText || elem.innerHTML; " +
-                        "    return text.trim(); " +
-                        "  } " +
-                        "  // 대체: divCrntEntrsAmt 시도 " +
-                        "  elem = document.getElementById('divCrntEntrsAmt'); " +
-                        "  if (elem) { " +
-                        "    var text = elem.textContent || elem.innerText || elem.innerHTML; " +
-                        "    return text.trim(); " +
-                        "  } " +
-                        "  return null; " +
-                        "} catch(e) { return null; }"
-                );
-                if (balanceObj != null) {
-                    balanceText = balanceObj.toString();
-                    log.info("JavaScript로 예치금 발견: {}", balanceText);
+            JavascriptExecutor js = (JavascriptExecutor) webDriver;
+
+            // 최대 10초 동안 totalAmt 요소의 값이 로드될 때까지 대기
+            for (int attempt = 0; attempt < 20; attempt++) {
+                try {
+                    Object balanceObj = js.executeScript(
+                            "try { " +
+                            "  var elem = document.getElementById('totalAmt'); " +
+                            "  if (elem) { " +
+                            "    var text = elem.textContent || elem.innerText || elem.innerHTML; " +
+                            "    text = text.trim(); " +
+                            "    // 값이 로드되었는지 확인 (빈 문자열이 아니고, null이 아니고, undefined가 아님) " +
+                            "    if (text && text !== '' && text !== 'undefined' && text !== 'null') { " +
+                            "      return text; " +
+                            "    } " +
+                            "  } " +
+                            "  return null; " +
+                            "} catch(e) { return null; }"
+                    );
+
+                    if (balanceObj != null && !balanceObj.toString().isEmpty() && !balanceObj.toString().equals("null")) {
+                        balanceText = balanceObj.toString();
+                        // 숫자가 포함되어 있는지 확인 (콤마가 있어도 숫자가 있으면 OK)
+                        String numbersOnly = balanceText.replaceAll("[^0-9]", "");
+                        if (!numbersOnly.isEmpty() || balanceText.equals("0")) {
+                            log.info("JavaScript로 예치금 발견 (시도 {}): {}", attempt + 1, balanceText);
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                    log.debug("예치금 조회 시도 {} 실패: {}", attempt + 1, e.getMessage());
                 }
-            } catch (Exception e) {
-                log.debug("JavaScript로 예치금 조회 실패: {}", e.getMessage());
+
+                Thread.sleep(500); // 0.5초 대기 후 재시도
             }
 
             // JavaScript로 찾지 못한 경우 Selenium으로 시도
@@ -520,18 +533,29 @@ public class LottoService {
             // 여전히 찾지 못한 경우 divCrntEntrsAmt 시도
             if (balanceText == null || balanceText.isEmpty()) {
                 try {
-                    WebElement balanceElement = webDriver.findElement(By.id("divCrntEntrsAmt"));
-                    if (balanceElement != null) {
-                        balanceText = balanceElement.getText();
-                        log.info("divCrntEntrsAmt에서 구매가능 금액 발견: {}", balanceText);
+                    Object balanceObj = js.executeScript(
+                            "try { " +
+                            "  var elem = document.getElementById('divCrntEntrsAmt'); " +
+                            "  if (elem) { " +
+                            "    var text = elem.textContent || elem.innerText || elem.innerHTML; " +
+                            "    return text.trim(); " +
+                            "  } " +
+                            "  return null; " +
+                            "} catch(e) { return null; }"
+                    );
+                    if (balanceObj != null && !balanceObj.toString().isEmpty()) {
+                        balanceText = balanceObj.toString();
+                        log.info("JavaScript로 divCrntEntrsAmt에서 구매가능 금액 발견: {}", balanceText);
                     }
                 } catch (Exception e) {
                     log.debug("divCrntEntrsAmt에서 구매가능 금액을 찾지 못함: {}", e.getMessage());
                 }
             }
 
+            // 여전히 찾지 못한 경우, 0원으로 처리 (요소는 존재하지만 값이 로드되지 않은 경우)
             if (balanceText == null || balanceText.isEmpty()) {
-                throw new RuntimeException("예치금 정보를 찾을 수 없습니다. 마이페이지가 정상적으로 로드되었는지 확인해주세요.");
+                log.warn("예치금 값을 찾을 수 없어 0원으로 처리합니다. 페이지가 완전히 로드되지 않았을 수 있습니다.");
+                balanceText = "0";
             }
 
             // 콤마 제거 및 숫자 파싱
