@@ -574,65 +574,50 @@ public class LottoService {
     }
 
     /**
-     * 구매 페이지의 iframe으로 전환
-     * 요소가 나타날 때까지 여러 번 시도하고, 필요 시 페이지를 새로고침합니다.
+     * 구매 페이지의 iframe으로 전환 (또는 직접 페이지 사용)
+     * iframe이 존재하는 경우에만 전환하고, 없으면 현재 페이지에서 진행합니다.
      */
     private void switchToPurchaseIframe() {
-        int maxAttempts = 3;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                log.info("구매 페이지 iframe 전환 시도 ({} / {})...", attempt, maxAttempts);
-
-                // 1. 모든 팝업 다시 한 번 닫기 (iframe을 가릴 수 있음)
-                closeAllPopups();
-                Thread.sleep(1000);
-
-                // 2. iframe 존재 여부 확인
-                try {
-                    WebDriverWait shortWait = new WebDriverWait(webDriver, java.time.Duration.ofSeconds(10));
-                    WebElement iframe = shortWait.until(
-                            ExpectedConditions.presenceOfElementLocated(By.id("ifrm_answer"))
-                    );
-
-                    // 3. iframe으로 전환
-                    webDriver.switchTo().frame(iframe);
-                    log.info("✅ iframe 전환 성공");
-
-                    // 4. iframe 내부 콘텐츠 로드 확인
-                    webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
-                    log.info("✅ iframe 내부 콘텐츠(자동선택 버튼) 확인됨");
-                    return;
-
-                } catch (Exception e) {
-                    log.warn("iframe을 찾지 못했습니다 (시도 {}): {}", attempt, e.getMessage());
-                    
-                    if (attempt < maxAttempts) {
-                        log.info("페이지 새로고침 후 재시도 중...");
-                        webDriver.navigate().refresh();
-                        webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
-                        Thread.sleep(2000);
-                    }
-                }
-            } catch (Exception e) {
-                log.error("iframe 전환 시도 중 오류 발생 (시도 {}): {}", attempt, e.getMessage());
-            }
-        }
-
-        // 모든 시도 실패 시
-        log.error("❌ 모든 시도 후에도 iframe으로 전환할 수 없습니다.");
-        
-        // 현재 페이지 상태 로깅
         try {
-            log.info("실패 시 현재 URL: {}", webDriver.getCurrentUrl());
-            String pageSource = webDriver.getPageSource();
-            if (pageSource != null) {
-                log.info("페이지 소스 요약 (앞 500자): {}", pageSource.substring(0, Math.min(pageSource.length(), 500)));
+            log.info("구매 페이지 콘텐츠 확인 중...");
+
+            // 1. 모든 팝업 다시 한 번 닫기
+            closeAllPopups();
+            Thread.sleep(2000);
+
+            // 2. 대기열 또는 구매한도 초과 확인
+            String source = webDriver.getPageSource();
+            if (source.contains("서비스연결 대기중")) {
+                log.info("⏳ 접속 대기열 발견... 잠시 대기합니다.");
+                webDriverWait.until(ExpectedConditions.invisibilityOfElementLocated(By.xpath("//*[contains(text(), '서비스연결 대기중')]")));
             }
-        } catch (Exception logE) {
-            log.warn("상태 로깅 중 오류: {}", logE.getMessage());
+            
+            if (source.contains("구매한도 5천원을 모두 채우셨습니다")) {
+                log.error("❌ 이미 이번 주 로또 구매 한도를 초과했습니다.");
+                telegramNotificationService.sendMessage("🚨 구매 실패: 이번 주 로또 구매 한도(5,000원)를 이미 초과했습니다.");
+                System.exit(0); // 정상 종료로 처리
+            }
+
+            // 3. iframe 존재 여부 확인 (최대 5초만 대기)
+            log.info("iframe 존재 여부 확인 중...");
+            List<WebElement> iframes = webDriver.findElements(By.id("ifrm_answer"));
+            
+            if (!iframes.isEmpty()) {
+                log.info("✅ iframe(ifrm_answer) 발견. 프레임 전환을 수행합니다.");
+                webDriver.switchTo().frame(iframes.get(0));
+            } else {
+                log.info("ℹ️ iframe이 발견되지 않았습니다. 메인 페이지에서 직접 요소를 찾습니다.");
+            }
+
+            // 4. 실제 로또 번호 선택 버튼(자동선택 등)이 나타날 때까지 대기
+            log.info("로또 구매 요소(자동선택 버튼) 로드 대기 중...");
+            webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
+            log.info("✅ 로또 구매 요소 확인 완료");
+
+        } catch (Exception e) {
+            log.error("❌ 구매 페이지 콘텐츠 로드 실패: {}", e.getMessage());
+            throw new RuntimeException("구매 페이지 준비 실패: " + e.getMessage());
         }
-        
-        throw new RuntimeException("구매 페이지 iframe 전환 실패 (타임아웃)");
     }
 
     /**
@@ -645,17 +630,18 @@ public class LottoService {
         try {
             log.info("로또 {}게임(5,000원) 자동 구매 프로세스를 시작합니다. (고정 구매)", FIXED_GAME_COUNT);
 
-            // iframe 내부에서 작업 (이미 전환된 상태라고 가정)
-            // 만약 전환되지 않았다면 다시 전환 시도
+            // [사용자 피드백 반영] iframe 전환은 이미 이전 단계에서 조건부로 완료됨
+            // 현재 컨텍스트에서 바로 구매 절차 진행
+            log.info("로또 구매 요소(자동선택 버튼) 로드 대기 중...");
             try {
-                webDriver.switchTo().defaultContent();
-                WebElement iframe = webDriverWait.until(
-                        ExpectedConditions.presenceOfElementLocated(By.id("ifrm_answer"))
-                );
-                webDriver.switchTo().frame(iframe);
-                log.info("iframe으로 재전환 완료");
+                webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
             } catch (Exception e) {
-                log.debug("iframe 재전환 시도 (이미 iframe 내부일 수 있음): {}", e.getMessage());
+                log.warn("자동선택 버튼을 찾지 못함. 최후의 수단으로 iframe 재전환 시도...");
+                List<WebElement> iframes = webDriver.findElements(By.id("ifrm_answer"));
+                if (!iframes.isEmpty()) {
+                    webDriver.switchTo().frame(iframes.get(0));
+                    log.info("iframe으로 재전환 완료");
+                }
             }
 
             // 1. 5게임 선택: 자동선택 버튼을 5번 클릭하고 확인 버튼을 5번 클릭
