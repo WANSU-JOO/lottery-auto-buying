@@ -48,185 +48,17 @@ public class LottoService {
             log.info("로그인 페이지로 이동: {}", LOGIN_URL);
             webDriver.get(LOGIN_URL);
             
-            // 페이지 로드 완료 대기
+            // 페이지 로드 완료 대기 (간단하게)
             webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
-            Thread.sleep(3000); // 추가 대기 (스크립트 로드)
+            Thread.sleep(2000); // 스크립트 로드 대기
             
-            // 자동화 감지 우회 JavaScript 재주입 (페이지 로드 후)
-            try {
-                JavascriptExecutor js = (JavascriptExecutor) webDriver;
-                js.executeScript(
-                    "Object.defineProperty(navigator, 'webdriver', {" +
-                    "  get: () => undefined" +
-                    "});"
-                );
-                log.debug("페이지 로드 후 자동화 감지 우회 JavaScript 주입 완료");
-            } catch (Exception e) {
-                log.debug("자동화 감지 우회 JavaScript 주입 실패 (계속 진행): {}", e.getMessage());
-            }
-            
-            // 현재 URL과 페이지 상태 확인
-            String currentUrl = webDriver.getCurrentUrl();
-            String pageTitle = webDriver.getTitle();
-            log.info("현재 URL: {}", currentUrl);
-            log.info("페이지 제목: {}", pageTitle);
-            
-            // 페이지 소스 일부 확인 (디버깅용)
-            try {
-                String pageSource = webDriver.getPageSource();
-                log.info("페이지 소스 길이: {} bytes", pageSource.length());
-                
-                // loginForm이 페이지 소스에 있는지 확인
-                if (pageSource.contains("loginForm")) {
-                    log.info("페이지 소스에 'loginForm' 문자열이 존재합니다.");
-                } else {
-                    log.warn("페이지 소스에 'loginForm' 문자열이 없습니다.");
-                    // 페이지 소스의 일부 출력 (처음 2000자)
-                    int previewLength = Math.min(2000, pageSource.length());
-                    log.warn("페이지 소스 미리보기 (처음 {} bytes): {}", previewLength, 
-                            pageSource.substring(0, previewLength));
-                }
-            } catch (Exception e) {
-                log.warn("페이지 소스 확인 실패: {}", e.getMessage());
-            }
-            
-            // 페이지가 완전히 로드될 때까지 대기
-            try {
-                JavascriptExecutor js = (JavascriptExecutor) webDriver;
-                // document.readyState가 'complete'가 될 때까지 대기
-                for (int i = 0; i < 20; i++) {
-                    Object readyState = js.executeScript("return document.readyState");
-                    if ("complete".equals(readyState)) {
-                        log.info("페이지 로드 완료 (readyState: {})", readyState);
-                        break;
-                    }
-                    Thread.sleep(500);
-                }
-                
-                // jQuery가 로드될 때까지 대기
-                for (int i = 0; i < 15; i++) {
-                    Object jQueryLoaded = js.executeScript("return typeof jQuery !== 'undefined'");
-                    if (Boolean.TRUE.equals(jQueryLoaded)) {
-                        log.info("jQuery 로드 완료");
-                        break;
-                    }
-                    Thread.sleep(500);
-                }
-                
-                // 추가 대기 (동적 콘텐츠 로드)
-                Thread.sleep(2000);
-            } catch (Exception e) {
-                log.debug("페이지 로드 확인 실패, 계속 진행: {}", e.getMessage());
-            }
-            
-            // 로그인 폼과 입력 필드가 나타날 때까지 대기 (JavaScript로 직접 찾기)
-            log.info("로그인 폼 대기 중...");
-            WebElement userIdInput = null;
-            
-            // JavaScript로 직접 요소 찾기 시도
-            try {
-                JavascriptExecutor js = (JavascriptExecutor) webDriver;
-                
-                // 방법 1: JavaScript로 직접 요소 찾기 및 강제 표시
-                for (int attempt = 0; attempt < 20; attempt++) {
-                    try {
-                        // JavaScript로 요소가 존재하는지 확인
-                        Object elementExists = js.executeScript(
-                            "var form = document.getElementById('loginForm');" +
-                            "var input = document.getElementById('inpUserId');" +
-                            "if (form && input) {" +
-                            "  // 요소가 숨겨져 있을 수 있으므로 강제로 표시" +
-                            "  form.style.display = 'block';" +
-                            "  form.style.visibility = 'visible';" +
-                            "  input.style.display = 'block';" +
-                            "  input.style.visibility = 'visible';" +
-                            "  return true;" +
-                            "}" +
-                            "return false;"
-                        );
-                        
-                        if (Boolean.TRUE.equals(elementExists)) {
-                            log.info("JavaScript로 loginForm과 inpUserId를 찾았습니다 (시도 {}회)", attempt + 1);
-                            Thread.sleep(1000); // DOM 업데이트 대기
-                            break;
-                        }
-                    } catch (Exception e) {
-                        log.debug("JavaScript 요소 찾기 시도 {} 실패: {}", attempt + 1, e.getMessage());
-                    }
-                    
-                    if (attempt < 19) {
-                        Thread.sleep(500);
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("JavaScript로 요소 찾기 실패, 일반 방법 시도: {}", e.getMessage());
-            }
-            
-            // 일반 방법으로 요소 찾기
-            try {
-                // inpUserId를 먼저 찾기 (이게 더 확실함)
-                userIdInput = webDriverWait.until(
-                        ExpectedConditions.presenceOfElementLocated(By.id("inpUserId"))
-                );
-                log.info("로그인 입력 필드(inpUserId)를 찾았습니다.");
-            } catch (Exception e) {
-                log.warn("inpUserId를 찾지 못함, JavaScript로 다시 시도: {}", e.getMessage());
-                
-                // JavaScript로 직접 요소 가져오기
-                try {
-                    JavascriptExecutor js = (JavascriptExecutor) webDriver;
-                    Object element = js.executeScript(
-                        "var input = document.getElementById('inpUserId');" +
-                        "if (input) {" +
-                        "  input.style.display = 'block';" +
-                        "  input.style.visibility = 'visible';" +
-                        "  return input;" +
-                        "}" +
-                        "return null;"
-                    );
-                    
-                    if (element != null) {
-                        // JavaScript로 요소를 표시했으므로 다시 Selenium으로 찾기
-                        Thread.sleep(1000); // DOM 업데이트 대기
-                        userIdInput = webDriverWait.until(
-                                ExpectedConditions.presenceOfElementLocated(By.id("inpUserId"))
-                        );
-                        log.info("JavaScript로 표시 후 inpUserId를 찾았습니다.");
-                    } else {
-                        throw new RuntimeException("inpUserId를 찾을 수 없습니다.");
-                    }
-                } catch (Exception e2) {
-                    log.error("모든 방법으로 로그인 입력 필드를 찾지 못했습니다.");
-                    log.error("현재 URL: {}", currentUrl);
-                    log.error("페이지 제목: {}", pageTitle);
-                    
-                    // 페이지 소스에서 실제 구조 확인
-                    try {
-                        String pageSource = webDriver.getPageSource();
-                        if (pageSource.contains("inpUserId")) {
-                            log.error("페이지 소스에는 'inpUserId'가 있지만 DOM에서 찾을 수 없습니다.");
-                            log.error("봇 차단 또는 동적 로딩 문제일 수 있습니다.");
-                        }
-                    } catch (Exception e3) {
-                        // 무시
-                    }
-                    
-                    throw new RuntimeException("로그인 입력 필드를 찾을 수 없습니다. 페이지가 정상적으로 로드되었는지 확인해주세요. URL: " + currentUrl);
-                }
-            }
-
             // 2. 팝업 닫기 처리
             closeAllPopups();
             
-            // 팝업 닫은 후 입력 필드 다시 확인
-            userIdInput = webDriverWait.until(
-                    ExpectedConditions.presenceOfElementLocated(By.id("inpUserId"))
-            );
-
             // 3. RSA 모듈러스 가져오기 (암호화를 위해 필요)
             waitForRsaModulus();
 
-            // 4. 로그인 폼 입력
+            // 4. 로그인 정보 확인
             String userId = lotteryConfig.getUsername();
             String userPw = lotteryConfig.getPassword();
 
@@ -236,31 +68,28 @@ public class LottoService {
                 return false;
             }
 
-            log.info("로그인 정보 입력 중...");
-            WebElement passwordInput = webDriver.findElement(By.id("inpUserPswdEncn"));
-
-            userIdInput.clear();
-            userIdInput.sendKeys(userId);
-            passwordInput.clear();
-            passwordInput.sendKeys(userPw);
-
-            // 5. RSA 암호화 수행 및 hidden 필드에 설정
+            log.info("JavaScript로 로그인 정보 입력 중...");
+            
+            // 5. JavaScript로 직접 값 입력 및 로그인
+            JavascriptExecutor js = (JavascriptExecutor) webDriver;
+            
+            // JavaScript로 직접 입력 필드에 값 설정
+            js.executeScript(
+                "var userIdInput = document.getElementById('inpUserId');" +
+                "var passwordInput = document.getElementById('inpUserPswdEncn');" +
+                "if (userIdInput) userIdInput.value = arguments[0];" +
+                "if (passwordInput) passwordInput.value = arguments[1];",
+                userId, userPw
+            );
+            log.info("입력 필드에 값 설정 완료");
+            
+            // 6. RSA 암호화 수행 및 hidden 필드에 설정
             encryptAndSetCredentials(userId, userPw);
 
-            // 6. 로그인 폼 제출
-            // 방법 1: JavaScript로 직접 submit (더 안정적)
-            try {
-                JavascriptExecutor js = (JavascriptExecutor) webDriver;
-                js.executeScript("document.getElementById('loginForm').submit();");
-                log.info("JavaScript로 로그인 폼 제출");
-            } catch (Exception e) {
-                // JavaScript 제출 실패 시 버튼 클릭으로 대체
-                log.warn("JavaScript 제출 실패, 버튼 클릭으로 대체: {}", e.getMessage());
-                WebElement loginButton = webDriverWait.until(
-                        ExpectedConditions.elementToBeClickable(By.id("btnLogin"))
-                );
-                loginButton.click();
-            }
+            // 7. 로그인 폼 제출 (JavaScript로 직접)
+            Thread.sleep(500); // 암호화 완료 대기
+            js.executeScript("document.getElementById('loginForm').submit();");
+            log.info("JavaScript로 로그인 폼 제출 완료");
 
             // 7. 로그인 완료 대기 (페이지 이동 또는 로그인 결과 확인)
             // 페이지가 로드되거나 URL이 변경될 때까지 대기
