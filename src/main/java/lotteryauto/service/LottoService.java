@@ -610,21 +610,47 @@ public class LottoService {
                 log.debug("구매한도 확인 중 예외 발생 (무시): {}", e.getMessage());
             }
 
-            // 4. iframe 존재 여부 확인 (최대 5초만 대기)
+            // 4. iframe 존재 여부 확인 및 전환 (ifrm_answer 또는 ifrm_tab)
             log.info("iframe 존재 여부 확인 중...");
-            List<WebElement> iframes = webDriver.findElements(By.id("ifrm_answer"));
+            String[] iframeIds = {"ifrm_answer", "ifrm_tab"};
+            boolean switched = false;
             
-            if (!iframes.isEmpty()) {
-                log.info("✅ iframe(ifrm_answer) 발견. 프레임 전환을 수행합니다.");
-                webDriver.switchTo().frame(iframes.get(0));
-            } else {
-                log.info("ℹ️ iframe이 발견되지 않았습니다. 메인 페이지에서 직접 요소를 찾습니다.");
+            for (String id : iframeIds) {
+                try {
+                    List<WebElement> iframes = webDriver.findElements(By.id(id));
+                    if (!iframes.isEmpty()) {
+                        log.info("✅ iframe({}) 발견. 프레임 전환을 수행합니다.", id);
+                        webDriver.switchTo().frame(iframes.get(0));
+                        switched = true;
+                        break;
+                    }
+                } catch (Exception e) {
+                    log.debug("iframe({}) 확인 중 제외 발생: {}", id, e.getMessage());
+                }
+            }
+            
+            if (!switched) {
+                log.info("ℹ️ 알려진 iframe이 발견되지 않았습니다. 메인 페이지에서 직접 요소를 찾거나 다음 단계로 진행합니다.");
             }
 
             // 5. 실제 로또 번호 선택 버튼(자동선택 등)이 나타날 때까지 대기
             log.info("로또 구매 요소(자동선택 버튼) 로드 대기 중...");
-            webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
-            log.info("✅ 로또 구매 요소 확인 완료");
+            try {
+                webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
+                log.info("✅ 로또 구매 요소 확인 완료");
+            } catch (Exception e) {
+                log.error("❌ num2 요소를 찾지 못했습니다. 현재 페이지 상태를 다시 확인합니다.");
+                // iframe 내부에서 또 다른 iframe이 있을 가능성 체크 (드문 경우)
+                List<WebElement> innerIframes = webDriver.findElements(By.tagName("iframe"));
+                if (!innerIframes.isEmpty()) {
+                    log.info("내부 iframe {}개 발견. 첫 번째 내부 iframe으로 추가 전환 시도...", innerIframes.size());
+                    webDriver.switchTo().frame(0);
+                    webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
+                    log.info("✅ 내부 iframe 전환 후 요소 확인 완료");
+                } else {
+                    throw e; // 여전히 못 찾으면 예외 던짐
+                }
+            }
 
         } catch (Exception e) {
             log.error("❌ 구매 페이지 콘텐츠 로드 실패: {}", e.getMessage());
