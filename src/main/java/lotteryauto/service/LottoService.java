@@ -527,12 +527,13 @@ public class LottoService {
                 log.info("방법 2: 페이지 내 '원' 키워드 주변 텍스트 훑기...");
                 Object result = js.executeScript(
                     "var texts = [];" +
-                    "var elements = document.querySelectorAll('span, div, p, strong');" +
+                    "var elements = document.querySelectorAll('span, div, p, strong, b, em');" +
                     "for (var i=0; i<elements.length; i++) {" +
                     "  var t = elements[i].textContent || '';" +
                     "  if (t.includes('원') && /[0-9,]+/.test(t)) {" +
                     "    var num = t.replace(/[^0-9]/g, '');" +
-                    "    if (num.length >= 4) texts.push(parseInt(num));" +
+                    "    var val = parseInt(num);" +
+                    "    if (num.length >= 1 && num.length <= 9 && val < 10000000) texts.push(val);" + // 1,000만원 미만의 현실적인 금액만 수집
                     "  }" +
                     "}" +
                     "return texts.length > 0 ? Math.max.apply(null, texts).toString() : '0';"
@@ -547,7 +548,21 @@ public class LottoService {
             String cleaned = balanceText.replaceAll("[^0-9]", "");
             if (cleaned.isEmpty()) cleaned = "0";
             
-            int balance = Integer.parseInt(cleaned);
+            int balance = 0;
+            try {
+                // Integer 범위를 넘어서는 비정상적인 값은 0으로 처리하거나 롱으로 먼저 파싱
+                long longBalance = Long.parseLong(cleaned);
+                if (longBalance > 10000000) { // 1,000만원 초과는 비정상 데이터로 간주
+                    log.warn("비정상적으로 큰 잔액 감지됨 ({}원), 0원으로 처리합니다.", longBalance);
+                    balance = 0;
+                } else {
+                    balance = (int) longBalance;
+                }
+            } catch (NumberFormatException e) {
+                log.error("잔액 숫자 변환 실패 ({}): {}", cleaned, e.getMessage());
+                balance = 0;
+            }
+            
             log.info("✅ 예치금 확인 최종 완료: {}원", balance);
             
             return balance;
