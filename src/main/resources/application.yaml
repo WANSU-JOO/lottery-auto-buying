@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: lotteryauto
+
+# 환경 변수는 GitHub Secrets에서 주입됩니다.
+# LOTTERY_USERNAME: 로또 사이트 로그인 아이디
+# LOTTERY_PASSWORD: 로또 사이트 로그인 비밀번호
+# TELEGRAM_BOT_TOKEN: Telegram Bot Token
+# TELEGRAM_CHAT_ID: Telegram Chat ID
+# LOTTERY_GAME_COUNT: 구매할 게임 수 (선택, 기본값: 1)
