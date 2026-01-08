@@ -1,4 +1,4 @@
-name: 로또 자동 구매 (계정 1)
+name: 로또 자동 구매
 
 on:
   schedule:
