@@ -427,6 +427,8 @@ public class LottoService {
             // 잔액 확인
             int balance = getBalanceFromMyPage();
             log.info("현재 예치금: {}원", balance);
+            log.info("최소 필요 금액: {}원", MINIMUM_BALANCE);
+            log.info("잔액 비교: {} < {} = {}", balance, MINIMUM_BALANCE, balance < MINIMUM_BALANCE);
 
             // 2. 잔액이 5,000원 미만이면 알림 보내고 종료
             if (balance < MINIMUM_BALANCE) {
@@ -436,6 +438,8 @@ public class LottoService {
                 System.exit(1);
                 return false; // 실제로는 도달하지 않음
             }
+            
+            log.info("잔액 충분: 현재 잔액 {}원 >= 최소 필요 금액 {}원", balance, MINIMUM_BALANCE);
 
             // 3. 메인 페이지로 이동
             log.info("메인 페이지로 이동: {}", MAIN_URL);
@@ -476,15 +480,43 @@ public class LottoService {
             log.info("마이페이지에서 예치금 확인 중...");
 
             // 페이지 로드 후 JavaScript 실행 대기
-            Thread.sleep(2000);
+            Thread.sleep(1000);
 
-            // totalAmt 요소가 존재하고 값이 로드될 때까지 대기
-            // JavaScript가 비동기로 값을 설정하므로, 값이 업데이트될 때까지 대기
             String balanceText = null;
             JavascriptExecutor js = (JavascriptExecutor) webDriver;
 
-            // 최대 10초 동안 totalAmt 요소의 값이 로드될 때까지 대기
-            for (int attempt = 0; attempt < 20; attempt++) {
+            // 방법 1: divCrntEntrsAmt (구매가능 금액) 우선 사용 - 이것이 실제 구매 가능한 금액
+            log.info("구매가능 금액(divCrntEntrsAmt) 확인 중...");
+            try {
+                Object balanceObj = js.executeScript(
+                        "try { " +
+                        "  var elem = document.getElementById('divCrntEntrsAmt'); " +
+                        "  if (elem) { " +
+                        "    var text = elem.textContent || elem.innerText || elem.innerHTML; " +
+                        "    text = text.trim(); " +
+                        "    // 값이 로드되었는지 확인 " +
+                        "    if (text && text !== '' && text !== 'undefined' && text !== 'null') { " +
+                        "      return text; " +
+                        "    } " +
+                        "  } " +
+                        "  return null; " +
+                        "} catch(e) { return null; }"
+                );
+
+                if (balanceObj != null && !balanceObj.toString().isEmpty() && !balanceObj.toString().equals("null")) {
+                    balanceText = balanceObj.toString();
+                    String numbersOnly = balanceText.replaceAll("[^0-9]", "");
+                    if (!numbersOnly.isEmpty()) {
+                        log.info("JavaScript로 구매가능 금액 발견: {}", balanceText);
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("구매가능 금액 조회 실패: {}", e.getMessage());
+            }
+
+            // 방법 2: totalAmt (예치금 잔액) - 대체 방법
+            if (balanceText == null || balanceText.isEmpty()) {
+                log.info("예치금 잔액(totalAmt) 확인 중...");
                 try {
                     Object balanceObj = js.executeScript(
                             "try { " +
@@ -492,7 +524,6 @@ public class LottoService {
                             "  if (elem) { " +
                             "    var text = elem.textContent || elem.innerText || elem.innerHTML; " +
                             "    text = text.trim(); " +
-                            "    // 값이 로드되었는지 확인 (빈 문자열이 아니고, null이 아니고, undefined가 아님) " +
                             "    if (text && text !== '' && text !== 'undefined' && text !== 'null') { " +
                             "      return text; " +
                             "    } " +
@@ -503,71 +534,68 @@ public class LottoService {
 
                     if (balanceObj != null && !balanceObj.toString().isEmpty() && !balanceObj.toString().equals("null")) {
                         balanceText = balanceObj.toString();
-                        // 숫자가 포함되어 있는지 확인 (콤마가 있어도 숫자가 있으면 OK)
                         String numbersOnly = balanceText.replaceAll("[^0-9]", "");
                         if (!numbersOnly.isEmpty() || balanceText.equals("0")) {
-                            log.info("JavaScript로 예치금 발견 (시도 {}): {}", attempt + 1, balanceText);
-                            break;
+                            log.info("JavaScript로 예치금 잔액 발견: {}", balanceText);
                         }
                     }
                 } catch (Exception e) {
-                    log.debug("예치금 조회 시도 {} 실패: {}", attempt + 1, e.getMessage());
-                }
-
-                Thread.sleep(500); // 0.5초 대기 후 재시도
-            }
-
-            // JavaScript로 찾지 못한 경우 Selenium으로 시도
-            if (balanceText == null || balanceText.isEmpty()) {
-                try {
-                    WebElement balanceElement = webDriverWait.until(
-                            ExpectedConditions.presenceOfElementLocated(By.id("totalAmt"))
-                    );
-                    balanceText = balanceElement.getText();
-                    log.info("Selenium으로 totalAmt에서 예치금 발견: {}", balanceText);
-                } catch (Exception e) {
-                    log.debug("totalAmt에서 예치금을 찾지 못함: {}", e.getMessage());
+                    log.debug("예치금 잔액 조회 실패: {}", e.getMessage());
                 }
             }
 
-            // 여전히 찾지 못한 경우 divCrntEntrsAmt 시도
+            // 방법 3: Selenium으로 직접 조회
             if (balanceText == null || balanceText.isEmpty()) {
                 try {
-                    Object balanceObj = js.executeScript(
-                            "try { " +
-                            "  var elem = document.getElementById('divCrntEntrsAmt'); " +
-                            "  if (elem) { " +
-                            "    var text = elem.textContent || elem.innerText || elem.innerHTML; " +
-                            "    return text.trim(); " +
-                            "  } " +
-                            "  return null; " +
-                            "} catch(e) { return null; }"
-                    );
-                    if (balanceObj != null && !balanceObj.toString().isEmpty()) {
-                        balanceText = balanceObj.toString();
-                        log.info("JavaScript로 divCrntEntrsAmt에서 구매가능 금액 발견: {}", balanceText);
+                    // divCrntEntrsAmt 우선 시도
+                    try {
+                        WebElement balanceElement = webDriverWait.until(
+                                ExpectedConditions.presenceOfElementLocated(By.id("divCrntEntrsAmt"))
+                        );
+                        balanceText = balanceElement.getText();
+                        log.info("Selenium으로 divCrntEntrsAmt에서 구매가능 금액 발견: {}", balanceText);
+                    } catch (Exception e) {
+                        log.debug("Selenium으로 divCrntEntrsAmt 찾지 못함: {}", e.getMessage());
+                    }
+
+                    // totalAmt 시도
+                    if (balanceText == null || balanceText.isEmpty()) {
+                        WebElement balanceElement = webDriverWait.until(
+                                ExpectedConditions.presenceOfElementLocated(By.id("totalAmt"))
+                        );
+                        balanceText = balanceElement.getText();
+                        log.info("Selenium으로 totalAmt에서 예치금 발견: {}", balanceText);
                     }
                 } catch (Exception e) {
-                    log.debug("divCrntEntrsAmt에서 구매가능 금액을 찾지 못함: {}", e.getMessage());
+                    log.debug("Selenium으로 예치금 찾지 못함: {}", e.getMessage());
                 }
             }
 
-            // 여전히 찾지 못한 경우, 0원으로 처리 (요소는 존재하지만 값이 로드되지 않은 경우)
+            // 여전히 찾지 못한 경우, 0원으로 처리
             if (balanceText == null || balanceText.isEmpty()) {
                 log.warn("예치금 값을 찾을 수 없어 0원으로 처리합니다. 페이지가 완전히 로드되지 않았을 수 있습니다.");
                 balanceText = "0";
             }
 
             // 콤마 제거 및 숫자 파싱
+            String originalText = balanceText;
             String balanceNumber = balanceText.replaceAll("[^0-9]", "");
+            
+            log.info("예치금 파싱 전: 원본 텍스트='{}', 숫자만 추출='{}'", originalText, balanceNumber);
+            
             if (balanceNumber.isEmpty()) {
-                // 0원도 유효한 값이므로 "0"으로 처리
                 balanceNumber = "0";
-                log.warn("예치금 텍스트에서 숫자를 추출할 수 없어 0원으로 처리합니다. 원본: {}", balanceText);
+                log.warn("예치금 텍스트에서 숫자를 추출할 수 없어 0원으로 처리합니다. 원본: {}", originalText);
             }
 
             int balance = Integer.parseInt(balanceNumber);
-            log.info("예치금 파싱 완료: {}원 (원본 텍스트: {})", balance, balanceText);
+            log.info("예치금 파싱 완료: {}원 (원본 텍스트: '{}', 숫자만 추출: '{}')", balance, originalText, balanceNumber);
+            
+            // 디버깅: 파싱된 값 확인
+            if (balance < MINIMUM_BALANCE) {
+                log.warn("⚠️ 파싱된 잔액이 최소 금액보다 작습니다. 파싱된 값: {}원, 최소 필요: {}원", balance, MINIMUM_BALANCE);
+            }
+            
             return balance;
 
         } catch (Exception e) {
