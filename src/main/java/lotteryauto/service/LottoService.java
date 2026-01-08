@@ -50,13 +50,51 @@ public class LottoService {
             
             // 페이지 로드 완료 대기
             webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
-            Thread.sleep(2000); // 추가 대기 (스크립트 로드)
+            Thread.sleep(3000); // 추가 대기 (스크립트 로드)
+            
+            // 자동화 감지 우회 JavaScript 재주입 (페이지 로드 후)
+            try {
+                JavascriptExecutor js = (JavascriptExecutor) webDriver;
+                js.executeScript(
+                    "Object.defineProperty(navigator, 'webdriver', {" +
+                    "  get: () => undefined" +
+                    "});"
+                );
+                log.debug("페이지 로드 후 자동화 감지 우회 JavaScript 주입 완료");
+            } catch (Exception e) {
+                log.debug("자동화 감지 우회 JavaScript 주입 실패 (계속 진행): {}", e.getMessage());
+            }
+            
+            // 현재 URL과 페이지 상태 확인
+            String currentUrl = webDriver.getCurrentUrl();
+            String pageTitle = webDriver.getTitle();
+            log.info("현재 URL: {}", currentUrl);
+            log.info("페이지 제목: {}", pageTitle);
+            
+            // 페이지 소스 일부 확인 (디버깅용)
+            try {
+                String pageSource = webDriver.getPageSource();
+                log.info("페이지 소스 길이: {} bytes", pageSource.length());
+                
+                // loginForm이 페이지 소스에 있는지 확인
+                if (pageSource.contains("loginForm")) {
+                    log.info("페이지 소스에 'loginForm' 문자열이 존재합니다.");
+                } else {
+                    log.warn("페이지 소스에 'loginForm' 문자열이 없습니다.");
+                    // 페이지 소스의 일부 출력 (처음 2000자)
+                    int previewLength = Math.min(2000, pageSource.length());
+                    log.warn("페이지 소스 미리보기 (처음 {} bytes): {}", previewLength, 
+                            pageSource.substring(0, previewLength));
+                }
+            } catch (Exception e) {
+                log.warn("페이지 소스 확인 실패: {}", e.getMessage());
+            }
             
             // jQuery와 스크립트가 로드될 때까지 대기
             try {
                 JavascriptExecutor js = (JavascriptExecutor) webDriver;
                 // jQuery가 로드될 때까지 대기
-                for (int i = 0; i < 10; i++) {
+                for (int i = 0; i < 15; i++) {
                     Object jQueryLoaded = js.executeScript("return typeof jQuery !== 'undefined'");
                     if (Boolean.TRUE.equals(jQueryLoaded)) {
                         log.info("jQuery 로드 완료");
@@ -68,12 +106,41 @@ public class LottoService {
                 log.debug("jQuery 로드 확인 실패, 계속 진행: {}", e.getMessage());
             }
             
-            // 로그인 폼과 입력 필드가 나타날 때까지 대기
+            // 로그인 폼과 입력 필드가 나타날 때까지 대기 (여러 방법 시도)
             log.info("로그인 폼 대기 중...");
-            webDriverWait.until(
-                    ExpectedConditions.presenceOfElementLocated(By.id("loginForm"))
-            );
-            log.info("로그인 폼을 찾았습니다.");
+            WebElement loginForm = null;
+            try {
+                // 방법 1: id로 찾기
+                loginForm = webDriverWait.until(
+                        ExpectedConditions.presenceOfElementLocated(By.id("loginForm"))
+                );
+                log.info("로그인 폼을 찾았습니다 (id로).");
+            } catch (Exception e) {
+                log.warn("id로 loginForm을 찾지 못함, 다른 방법 시도: {}", e.getMessage());
+                try {
+                    // 방법 2: name으로 찾기
+                    loginForm = webDriverWait.until(
+                            ExpectedConditions.presenceOfElementLocated(By.name("loginForm"))
+                    );
+                    log.info("로그인 폼을 찾았습니다 (name으로).");
+                } catch (Exception e2) {
+                    log.warn("name으로 loginForm을 찾지 못함, CSS 선택자 시도: {}", e2.getMessage());
+                    try {
+                        // 방법 3: CSS 선택자로 찾기
+                        loginForm = webDriverWait.until(
+                                ExpectedConditions.presenceOfElementLocated(
+                                        By.cssSelector("form[id='loginForm'], form[name='loginForm']")
+                                )
+                        );
+                        log.info("로그인 폼을 찾았습니다 (CSS 선택자로).");
+                    } catch (Exception e3) {
+                        log.error("모든 방법으로 loginForm을 찾지 못했습니다.");
+                        log.error("현재 URL: {}", currentUrl);
+                        log.error("페이지 제목: {}", pageTitle);
+                        throw new RuntimeException("로그인 폼을 찾을 수 없습니다. 페이지가 정상적으로 로드되었는지 확인해주세요. URL: " + currentUrl);
+                    }
+                }
+            }
             
             // 로그인 입력 필드 확인
             WebElement userIdInput = webDriverWait.until(

@@ -40,26 +40,64 @@ public class SeleniumConfig {
         options.addArguments("--disable-dev-shm-usage");
         options.addArguments("--disable-gpu");
         
-        // 봇 차단 방지를 위한 User-Agent 설정
-        options.addArguments("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        // 봇 차단 방지를 위한 User-Agent 설정 (최신 Chrome 버전)
+        options.addArguments("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
         
         // 추가 보안 및 성능 옵션
         options.addArguments("--disable-blink-features=AutomationControlled");
         options.addArguments("--disable-extensions");
         options.addArguments("--disable-plugins");
-        options.addArguments("--disable-images"); // 이미지 로딩 비활성화로 성능 향상
+        // 이미지 로딩은 활성화 (일부 사이트에서 이미지 없으면 차단할 수 있음)
+        // options.addArguments("--disable-images");
         options.addArguments("--window-size=1920,1080");
+        options.addArguments("--lang=ko-KR,ko");
+        options.addArguments("--accept-lang=ko-KR,ko;q=0.9");
         
         // 자동화 감지 방지
         options.setExperimentalOption("excludeSwitches", new String[]{"enable-automation"});
         options.setExperimentalOption("useAutomationExtension", false);
+        
+        // 추가 봇 차단 우회 설정
+        options.addArguments("--disable-web-security");
+        options.addArguments("--allow-running-insecure-content");
         
         // 로그 레벨 설정
         System.setProperty("webdriver.chrome.logfile", "/dev/null");
         System.setProperty("webdriver.chrome.verboseLogging", "false");
 
         log.info("Chrome WebDriver를 Headless 모드로 초기화합니다.");
-        return new ChromeDriver(options);
+        ChromeDriver driver = new ChromeDriver(options);
+        
+        // 자동화 감지 우회를 위한 JavaScript 주입
+        try {
+            org.openqa.selenium.JavascriptExecutor js = (org.openqa.selenium.JavascriptExecutor) driver;
+            // webdriver 속성 숨기기
+            js.executeScript(
+                "Object.defineProperty(navigator, 'webdriver', {" +
+                "  get: () => undefined" +
+                "});"
+            );
+            // Chrome 객체 추가
+            js.executeScript(
+                "window.chrome = {" +
+                "  runtime: {}" +
+                "};"
+            );
+            // Permissions 객체 추가
+            js.executeScript(
+                "const originalQuery = window.navigator.permissions.query;" +
+                "window.navigator.permissions.query = (parameters) => (" +
+                "  parameters.name === 'notifications' ?" +
+                "    Promise.resolve({ state: Notification.permission }) :" +
+                "    originalQuery(parameters)" +
+                ");"
+            );
+            log.info("자동화 감지 우회 JavaScript 주입 완료");
+        } catch (Exception e) {
+            log.warn("자동화 감지 우회 JavaScript 주입 실패 (계속 진행): {}", e.getMessage());
+        }
+        
+        return driver;
     }
 
     /**
