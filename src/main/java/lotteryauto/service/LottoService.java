@@ -472,105 +472,91 @@ public class LottoService {
 
     /**
      * 마이페이지에서 예치금 금액 파싱
-     * 사이트 내부 JavaScript 함수를 직접 호출하여 가장 정확한 값을 가져옵니다.
      * 
      * @return 예치금 금액 (원, 콤마 제거된 숫자)
      */
     private int getBalanceFromMyPage() {
         try {
-            log.info("마이페이지에서 예치금 확인 중 (직접 API 호출 방식)...");
+            log.info("마이페이지에서 예치금 확인 중...");
 
             // 페이지 로드 대기
             Thread.sleep(3000);
 
             JavascriptExecutor js = (JavascriptExecutor) webDriver;
-            
-            // 방법 1: 사이트 내부의 cmmUtil.getUserMndp 함수를 직접 호출하여 데이터 획득
-            log.info("방법 1: 사이트 내부 getUserMndp API 호출 시도...");
             String balanceText = null;
+
+            // 방법 1: 사이트 내부 API (getUserMndp) 호출
+            log.info("방법 1: getUserMndp API 호출 시도...");
             try {
-                // 스크립트 실행 타임아웃 설정
                 webDriver.manage().timeouts().scriptTimeout(java.time.Duration.ofSeconds(10));
-                
-                // executeAsyncScript를 사용하여 비동기 콜백 결과를 기다림
-                Object balanceObj = js.executeAsyncScript(
-                    "var callback = arguments[arguments.length - 1];" +
-                    "try {" +
-                    "  if (typeof cmmUtil !== 'undefined' && typeof cmmUtil.getUserMndp === 'function') {" +
-                    "    cmmUtil.getUserMndp(function(data) {" +
-                    "      if (data) {" +
-                    "        // totalAmt, crntEntrsAmt 중 유효한 값 반환" +
-                    "        var amt = data.totalAmt || data.crntEntrsAmt || 0;" +
-                    "        callback(amt.toString());" +
-                    "      } else {" +
-                    "        callback('0');" +
-                    "      }" +
-                    "    });" +
-                    "  } else {" +
-                    "    callback(null);" +
-                    "  }" +
-                    "} catch(e) {" +
-                    "  callback(null);" +
+                Object result = js.executeAsyncScript(
+                    "var cb = arguments[arguments.length - 1];" +
+                    "if (typeof cmmUtil !== 'undefined' && typeof cmmUtil.getUserMndp === 'function') {" +
+                    "  cmmUtil.getUserMndp(function(d) {" +
+                    "    if (d) cb((d.totalAmt || d.crntEntrsAmt || 0).toString());" +
+                    "    else cb('0');" +
+                    "  });" +
+                    "} else {" +
+                    "  cb(null);" +
                     "}"
                 );
-                
-                if (balanceObj != null) {
-                    balanceText = balanceObj.toString();
-                    log.info("API 호출로 잔액 확인 성공: {}원", balanceText);
+                if (result != null) {
+                    balanceText = result.toString();
+                    log.info("방법 1 결과: {}원", balanceText);
                 }
             } catch (Exception e) {
-                log.warn("getUserMndp API 호출 실패: {}", e.getMessage());
+                log.warn("방법 1 실패: {}", e.getMessage());
             }
 
-            // 방법 2: DOM 요소(textContent) 직접 추출 시도 (API 호출 실패 시)
+            // 방법 2: DOM 요소에서 직접 추출 (방법 1 실패 시)
             if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
-                log.info("방법 2: DOM 요소(textContent) 직접 추출 시도...");
-                Object balanceObj = js.executeScript(
-                    "try {" +
-                    "  var ids = ['totalAmt', 'divCrntEntrsAmt', 'tooltipTotalAmt', 'navTotalAmt', 'tooltipTotalSAmt'];" +
-                    "  for (var i = 0; i < ids.length; i++) {" +
-                    "    var el = document.getElementById(ids[i]);" +
-                    "    if (el) {" +
-                    "      var txt = (el.textContent || el.innerText || '').replace(/[^0-9]/g, '');" +
-                    "      if (txt && txt !== '0') return txt;" +
-                    "    }" +
-                    "  }" +
-                    "  // 0원인 경우라도 요소가 존재하면 0 반환" +
-                    "  var totalAmtEl = document.getElementById('totalAmt');" +
-                    "  if (totalAmtEl) return (totalAmtEl.textContent || '0').replace(/[^0-9]/g, '');" +
-                    "  return null;" +
-                    "} catch(e) { return null; }"
-                );
-                if (balanceObj != null) {
-                    balanceText = balanceObj.toString();
-                    log.info("DOM 요소에서 잔액 발견: {}", balanceText);
+                log.info("방법 2: DOM 요소 직접 추출 시도...");
+                try {
+                    Object result = js.executeScript(
+                        "var ids = ['totalAmt', 'divCrntEntrsAmt', 'navTotalAmt', 'tooltipTotalAmt'];" +
+                        "for (var i=0; i<ids.length; i++) {" +
+                        "  var el = document.getElementById(ids[i]);" +
+                        "  if (el) {" +
+                        "    var val = el.textContent || el.innerText || '';" +
+                        "    val = val.replace(/[^0-9]/g, '');" +
+                        "    if (val && val !== '0') return val;" +
+                        "  }" +
+                        "}" +
+                        "return '0';"
+                    );
+                    if (result != null) {
+                        balanceText = result.toString();
+                        log.info("방법 2 결과: {}원", balanceText);
+                    }
+                } catch (Exception e) {
+                    log.warn("방법 2 실패: {}", e.getMessage());
                 }
             }
 
-            // 방법 3: 페이지 소스 정규식 파싱 (마지막 수단)
+            // 방법 3: 페이지 소스 정규식 파싱 (최후 수단)
             if (balanceText == null || balanceText.isEmpty() || balanceText.equals("0")) {
                 log.info("방법 3: 페이지 소스 정규식 파싱 시도...");
-                String pageSource = webDriver.getPageSource();
-                java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("id=\"(?:totalAmt|divCrntEntrsAmt)\"[^>]*>([0-9,]+)");
-                java.util.regex.Matcher matcher = pattern.matcher(pageSource);
-                if (matcher.find()) {
-                    balanceText = matcher.group(1);
-                    log.info("정규식으로 잔액 발견: {}", balanceText);
+                String source = webDriver.getPageSource();
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile("id=\"(?:totalAmt|divCrntEntrsAmt)\"[^>]*>([0-9,]+)");
+                java.util.regex.Matcher m = p.matcher(source);
+                if (m.find()) {
+                    balanceText = m.group(1);
+                    log.info("방법 3 결과: {}원", balanceText);
                 }
             }
 
-            // 최종 파싱
-            String numbersOnly = (balanceText != null) ? balanceText.replaceAll("[^0-9]", "") : "0";
-            if (numbersOnly.isEmpty()) numbersOnly = "0";
+            // 최종 정수 변환
+            String cleaned = (balanceText != null) ? balanceText.replaceAll("[^0-9]", "") : "0";
+            if (cleaned.isEmpty()) cleaned = "0";
             
-            int balance = Integer.parseInt(numbersOnly);
-            log.info("✅ 최종 잔액 확인 결과: {}원", balance);
+            int balance = Integer.parseInt(cleaned);
+            log.info("✅ 예치금 확인 완료: {}원", balance);
             
             return balance;
 
         } catch (Exception e) {
-            log.error("예치금 확인 중 치명적 오류: {}", e.getMessage(), e);
-            throw new RuntimeException("예치금 확인 실패: " + e.getMessage(), e);
+            log.error("예치금 확인 중 치명적 오류: {}", e.getMessage());
+            return 0; // 오류 발생 시 안전하게 0 반환 (이후 로직에서 잔액 부족으로 처리됨)
         }
     }
 
