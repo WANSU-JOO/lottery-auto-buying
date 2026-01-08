@@ -36,7 +36,7 @@ public class LotteryautoApplication implements CommandLineRunner {
 			// 환경 변수 유효성 검증
 			if (!lotteryConfig.isValid()) {
 				log.error("환경 변수가 올바르게 설정되지 않았습니다.");
-				log.error("필수 환경 변수: LOTTO_ID (또는 LOTTERY_USERNAME), LOTTO_PW (또는 LOTTERY_PASSWORD), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID");
+				log.error("필수 환경 변수: LOTTO_ID (또는 LOTTERY_USERNAME), LOTTO_PW (또는 LOTTERY_PASSWORD), TELEGRAM_TOKEN (또는 TELEGRAM_BOT_TOKEN), TELEGRAM_CHAT_ID");
 				System.exit(1);
 				return;
 			}

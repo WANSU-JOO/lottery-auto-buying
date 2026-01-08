@@ -28,8 +28,9 @@ public class LotteryConfig {
 
     /**
      * Telegram Bot Token
+     * 환경 변수: TELEGRAM_TOKEN 또는 TELEGRAM_BOT_TOKEN
      */
-    @Value("${TELEGRAM_BOT_TOKEN:}")
+    @Value("${TELEGRAM_TOKEN:${TELEGRAM_BOT_TOKEN:}}")
     private String telegramBotToken;
 
     /**
