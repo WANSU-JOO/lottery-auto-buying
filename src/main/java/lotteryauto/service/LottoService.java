@@ -575,27 +575,64 @@ public class LottoService {
 
     /**
      * 구매 페이지의 iframe으로 전환
+     * 요소가 나타날 때까지 여러 번 시도하고, 필요 시 페이지를 새로고침합니다.
      */
     private void switchToPurchaseIframe() {
-        try {
-            log.info("구매 페이지 iframe으로 전환 중...");
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                log.info("구매 페이지 iframe 전환 시도 ({} / {})...", attempt, maxAttempts);
 
-            // iframe이 로드될 때까지 대기
-            WebElement iframe = webDriverWait.until(
-                    ExpectedConditions.presenceOfElementLocated(By.id("ifrm_answer"))
-            );
+                // 1. 모든 팝업 다시 한 번 닫기 (iframe을 가릴 수 있음)
+                closeAllPopups();
+                Thread.sleep(1000);
 
-            // iframe으로 전환
-            webDriver.switchTo().frame(iframe);
-            log.info("iframe으로 전환 완료");
+                // 2. iframe 존재 여부 확인
+                try {
+                    WebDriverWait shortWait = new WebDriverWait(webDriver, java.time.Duration.ofSeconds(10));
+                    WebElement iframe = shortWait.until(
+                            ExpectedConditions.presenceOfElementLocated(By.id("ifrm_answer"))
+                    );
 
-            // iframe 내부가 로드될 때까지 대기
-            webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
+                    // 3. iframe으로 전환
+                    webDriver.switchTo().frame(iframe);
+                    log.info("✅ iframe 전환 성공");
 
-        } catch (Exception e) {
-            log.error("iframe 전환 중 오류 발생: {}", e.getMessage(), e);
-            throw new RuntimeException("iframe 전환 실패: " + e.getMessage(), e);
+                    // 4. iframe 내부 콘텐츠 로드 확인
+                    webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
+                    log.info("✅ iframe 내부 콘텐츠(자동선택 버튼) 확인됨");
+                    return;
+
+                } catch (Exception e) {
+                    log.warn("iframe을 찾지 못했습니다 (시도 {}): {}", attempt, e.getMessage());
+                    
+                    if (attempt < maxAttempts) {
+                        log.info("페이지 새로고침 후 재시도 중...");
+                        webDriver.navigate().refresh();
+                        webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
+                        Thread.sleep(2000);
+                    }
+                }
+            } catch (Exception e) {
+                log.error("iframe 전환 시도 중 오류 발생 (시도 {}): {}", attempt, e.getMessage());
+            }
         }
+
+        // 모든 시도 실패 시
+        log.error("❌ 모든 시도 후에도 iframe으로 전환할 수 없습니다.");
+        
+        // 현재 페이지 상태 로깅
+        try {
+            log.info("실패 시 현재 URL: {}", webDriver.getCurrentUrl());
+            String pageSource = webDriver.getPageSource();
+            if (pageSource != null) {
+                log.info("페이지 소스 요약 (앞 500자): {}", pageSource.substring(0, Math.min(pageSource.length(), 500)));
+            }
+        } catch (Exception logE) {
+            log.warn("상태 로깅 중 오류: {}", logE.getMessage());
+        }
+        
+        throw new RuntimeException("구매 페이지 iframe 전환 실패 (타임아웃)");
     }
 
     /**
