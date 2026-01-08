@@ -39,6 +39,13 @@ public class TelegramNotificationService {
             String botToken = lotteryConfig.getTelegramBotToken();
             String chatId = lotteryConfig.getTelegramChatId();
             
+            // 토큰 형식 체크 (숫자:문자열 형식이어야 함)
+            if (!botToken.contains(":")) {
+                log.error("❌ Telegram 토큰 형식이 올바르지 않습니다. '123456789:ABCDEF...' 형식이어야 합니다.");
+                log.error("현재 입력된 토큰: {} (ID 부분이 누락된 것으로 보입니다.)", botToken);
+                return false;
+            }
+            
             // POST 요청으로 변경하여 URL 인코딩 문제 해결
             String url = String.format("%s%s/sendMessage", TELEGRAM_API_BASE_URL, botToken);
             
@@ -51,13 +58,19 @@ public class TelegramNotificationService {
                     .uri(url)
                     .body(BodyInserters.fromFormData(formData))
                     .retrieve()
+                    .onStatus(status -> status.is4xxClientError(), response -> {
+                        if (response.statusCode().value() == 404) {
+                            log.error("❌ Telegram API 404 오류: 토큰이 올바르지 않거나 봇이 존재하지 않습니다.");
+                        }
+                        return response.createException();
+                    })
                     .bodyToMono(String.class)
                     .block();
 
             log.info("Telegram 메시지 전송 성공: {}", message);
             return true;
         } catch (Exception e) {
-            log.error("Telegram 메시지 전송 실패: {}", e.getMessage(), e);
+            log.error("Telegram 메시지 전송 실패: {}", e.getMessage());
             return false;
         }
     }

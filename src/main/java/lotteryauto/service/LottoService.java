@@ -583,7 +583,7 @@ public class LottoService {
 
             // 1. 모든 팝업 다시 한 번 닫기
             closeAllPopups();
-            Thread.sleep(2000);
+            Thread.sleep(3000); // 페이지 안정화를 위해 대기 연장
 
             // 2. 대기열 확인 (실제로 보이는 경우에만)
             try {
@@ -610,46 +610,108 @@ public class LottoService {
                 log.debug("구매한도 확인 중 예외 발생 (무시): {}", e.getMessage());
             }
 
-            // 4. iframe 존재 여부 확인 및 전환 (ifrm_answer 또는 ifrm_tab)
-            log.info("iframe 존재 여부 확인 중...");
-            String[] iframeIds = {"ifrm_answer", "ifrm_tab"};
-            boolean switched = false;
+            // 4. 창 전환 및 iframe 구조 탐색 (더욱 강력한 탐색 로직)
+            log.info("구매 페이지 탐색 시작 (창 전환 및 iframe 전수 조사)...");
             
-            for (String id : iframeIds) {
-                try {
-                    List<WebElement> iframes = webDriver.findElements(By.id(id));
-                    if (!iframes.isEmpty()) {
-                        log.info("✅ iframe({}) 발견. 프레임 전환을 수행합니다.", id);
-                        webDriver.switchTo().frame(iframes.get(0));
-                        switched = true;
-                        break;
+            boolean ready = false;
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                log.info("구매 요소 탐색 시도 {}/3...", attempt);
+                
+                // 4-1. 여러 개의 창이 떴는지 확인 (가끔 팝업으로 구매창이 뜸)
+                Set<String> handles = webDriver.getWindowHandles();
+                if (handles.size() > 1) {
+                    log.info("새 창 감지됨. 구매 페이지 창으로 전환 시도...");
+                    for (String handle : handles) {
+                        try {
+                            webDriver.switchTo().window(handle);
+                            if (webDriver.getCurrentUrl().contains("game645.do") || !webDriver.findElements(By.id("num2")).isEmpty()) {
+                                log.info("✅ 구매 창 발견 및 전환 완료: {}", webDriver.getCurrentUrl());
+                                break;
+                            }
+                        } catch (Exception ignored) {}
                     }
-                } catch (Exception e) {
-                    log.debug("iframe({}) 확인 중 제외 발생: {}", id, e.getMessage());
                 }
-            }
-            
-            if (!switched) {
-                log.info("ℹ️ 알려진 iframe이 발견되지 않았습니다. 메인 페이지에서 직접 요소를 찾거나 다음 단계로 진행합니다.");
+
+                // 4-2. 현재 컨텍스트에서 바로 num2 확인
+                if (!webDriver.findElements(By.id("num2")).isEmpty()) {
+                    log.info("✅ 현재 컨텍스트에서 num2 요소를 발견했습니다.");
+                    ready = true;
+                    break;
+                }
+
+                // 4-3. 알려진 iframe(ifrm_tab -> ifrm_answer) 순차 탐색
+                try {
+                    webDriver.switchTo().defaultContent();
+                    List<WebElement> tabFrames = webDriver.findElements(By.id("ifrm_tab"));
+                    if (!tabFrames.isEmpty()) {
+                        webDriver.switchTo().frame(tabFrames.get(0));
+                        log.info("ℹ️ ifrm_tab 진입 성공");
+                        if (!webDriver.findElements(By.id("num2")).isEmpty()) {
+                            ready = true;
+                            break;
+                        }
+                        // 중첩된 ifrm_answer 확인
+                        List<WebElement> ansFrames = webDriver.findElements(By.id("ifrm_answer"));
+                        if (!ansFrames.isEmpty()) {
+                            webDriver.switchTo().frame(ansFrames.get(0));
+                            log.info("ℹ️ ifrm_answer 진입 성공");
+                            if (!webDriver.findElements(By.id("num2")).isEmpty()) {
+                                ready = true;
+                                break;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                // 4-4. 모든 iframe 전수 조사 (재귀적 탐색 대용)
+                if (!ready) {
+                    webDriver.switchTo().defaultContent();
+                    List<WebElement> allIframes = webDriver.findElements(By.tagName("iframe"));
+                    log.info("전수 조사: 현재 레벨에서 {}개의 iframe 발견", allIframes.size());
+                    
+                    for (int i = 0; i < allIframes.size(); i++) {
+                        try {
+                            webDriver.switchTo().defaultContent();
+                            webDriver.switchTo().frame(i);
+                            if (!webDriver.findElements(By.id("num2")).isEmpty()) {
+                                log.info("✅ {}번째 iframe에서 num2 요소를 발견했습니다.", i);
+                                ready = true;
+                                break;
+                            }
+                            // 한 단계 더 깊이
+                            List<WebElement> nested = webDriver.findElements(By.tagName("iframe"));
+                            for (int j = 0; j < nested.size(); j++) {
+                                webDriver.switchTo().frame(j);
+                                if (!webDriver.findElements(By.id("num2")).isEmpty()) {
+                                    log.info("✅ {}번째 프레임의 {}번째 중첩 프레임에서 num2 발견.", i, j);
+                                    ready = true;
+                                    break;
+                                }
+                                webDriver.switchTo().parentFrame();
+                            }
+                            if (ready) break;
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                if (ready) break;
+                log.info("탐색 실패, 2초 후 재시도...");
+                Thread.sleep(2000);
             }
 
-            // 5. 실제 로또 번호 선택 버튼(자동선택 등)이 나타날 때까지 대기
-            log.info("로또 구매 요소(자동선택 버튼) 로드 대기 중...");
-            try {
-                webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
-                log.info("✅ 로또 구매 요소 확인 완료");
-            } catch (Exception e) {
-                log.error("❌ num2 요소를 찾지 못했습니다. 현재 페이지 상태를 다시 확인합니다.");
-                // iframe 내부에서 또 다른 iframe이 있을 가능성 체크 (드문 경우)
-                List<WebElement> innerIframes = webDriver.findElements(By.tagName("iframe"));
-                if (!innerIframes.isEmpty()) {
-                    log.info("내부 iframe {}개 발견. 첫 번째 내부 iframe으로 추가 전환 시도...", innerIframes.size());
-                    webDriver.switchTo().frame(0);
-                    webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
-                    log.info("✅ 내부 iframe 전환 후 요소 확인 완료");
-                } else {
-                    throw e; // 여전히 못 찾으면 예외 던짐
-                }
+            if (!ready) {
+                log.info("표준 방식으로 찾지 못함. JavaScript로 강제 확인 시도...");
+                try {
+                    Object exists = js.executeScript("return document.getElementById('num2') !== null;");
+                    if (exists != null && (Boolean) exists) {
+                        log.info("✅ JavaScript로 num2 요소 확인 성공!");
+                        ready = true;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            if (!ready) {
+                throw new RuntimeException("모든 시도에도 불구하고 num2(자동선택) 요소를 찾지 못했습니다.");
             }
 
         } catch (Exception e) {
@@ -659,119 +721,90 @@ public class LottoService {
     }
 
     /**
-     * iframe 내부에서 로또 5게임(5,000원) 자동 구매 실행
-     * 무조건 5게임(5,000원)만 구매합니다.
+     * 실제 로또 5게임 자동 선택 및 구매
      * 
      * @return 구매 성공 여부
      */
     public boolean purchaseLotto() {
         try {
-            log.info("로또 {}게임(5,000원) 자동 구매 프로세스를 시작합니다. (고정 구매)", FIXED_GAME_COUNT);
+            log.info("로또 {}게임(5,000원) 자동 구매 프로세스 시작...", FIXED_GAME_COUNT);
+            JavascriptExecutor js = (JavascriptExecutor) webDriver;
 
-            // [사용자 피드백 반영] iframe 전환은 이미 이전 단계에서 조건부로 완료됨
-            // 현재 컨텍스트에서 바로 구매 절차 진행
-            log.info("로또 구매 요소(자동선택 버튼) 로드 대기 중...");
+            // 1. 자동선택 버튼 클릭 (num2)
+            log.info("1단계: '자동선택' 버튼 클릭 중...");
             try {
-                webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("num2")));
+                js.executeScript("document.getElementById('num2').click();");
+                log.info(" - 자동선택 버튼 클릭 완료 (JS)");
             } catch (Exception e) {
-                log.warn("자동선택 버튼을 찾지 못함. 최후의 수단으로 iframe 재전환 시도...");
-                List<WebElement> iframes = webDriver.findElements(By.id("ifrm_answer"));
-                if (!iframes.isEmpty()) {
-                    webDriver.switchTo().frame(iframes.get(0));
-                    log.info("iframe으로 재전환 완료");
+                log.error("자동선택 버튼 클릭 실패: {}", e.getMessage());
+                return false;
+            }
+            Thread.sleep(1000);
+
+            // 2. 확인 버튼 5번 클릭 (btnSelectNum)
+            log.info("2단계: '확인' 버튼 {}회 클릭 중 (게임 선택)...", FIXED_GAME_COUNT);
+            for (int i = 1; i <= FIXED_GAME_COUNT; i++) {
+                try {
+                    js.executeScript("document.getElementById('btnSelectNum').click();");
+                    log.info(" - {}번째 게임 선택 완료", i);
+                } catch (Exception e) {
+                    log.warn(" - {}번째 게임 선택 중 오류 (무시하고 재시도): {}", i, e.getMessage());
                 }
+                Thread.sleep(800);
             }
 
-            // 1. 5게임 선택: 자동선택 버튼을 5번 클릭하고 확인 버튼을 5번 클릭
-            log.info("{}게임 선택 시작... (고정 구매)", FIXED_GAME_COUNT);
-            selectFiveGames();
-
-            // 2. 왼쪽 리스트에 5게임이 모두 있는지 확인
-            log.info("선택된 게임 수 확인 중...");
-            int selectedGameCount = verifySelectedGameCount();
-            if (selectedGameCount < FIXED_GAME_COUNT) {
-                log.warn("선택된 게임 수가 부족합니다: {}게임 (목표: {}게임)", selectedGameCount, FIXED_GAME_COUNT);
-                // 부족한 만큼 추가 선택 시도
-                int remainingGames = FIXED_GAME_COUNT - selectedGameCount;
-                log.info("부족한 {}게임 추가 선택 시도...", remainingGames);
-                for (int i = 0; i < remainingGames; i++) {
-                    selectSingleGame();
-                    Thread.sleep(800); // 각 선택 사이 대기
-                }
-                selectedGameCount = verifySelectedGameCount();
-            }
-
-            if (selectedGameCount < FIXED_GAME_COUNT) {
-                throw new RuntimeException(String.format("%d게임 선택 실패: 현재 %d게임만 선택됨", FIXED_GAME_COUNT, selectedGameCount));
-            }
-
-            log.info("{}게임 선택 완료 확인: {}게임 (고정 구매)", FIXED_GAME_COUNT, selectedGameCount);
-
-            // 3. 구매하기 버튼 클릭
-            log.info("구매하기 버튼 클릭 중...");
-            WebElement buyButton = webDriverWait.until(
-                    ExpectedConditions.elementToBeClickable(By.id("btnBuy"))
-            );
-            buyButton.click();
-            log.info("구매하기 버튼 클릭 완료");
-
-            // 4. Alert 처리 (구매 확인) - ExpectedConditions.alertIsPresent() 사용
+            // 3. 구매하기 버튼 클릭 (btnBuy)
+            log.info("3단계: '구매하기' 버튼 클릭 중...");
             try {
-                log.info("구매 확인 Alert 대기 중...");
-                org.openqa.selenium.Alert alert = webDriverWait.until(
-                        ExpectedConditions.alertIsPresent()
-                );
-                String alertText = alert.getText();
-                log.info("Alert 확인: {}", alertText);
+                js.executeScript("document.getElementById('btnBuy').click();");
+            } catch (Exception e) {
+                log.error("구매하기 버튼 클릭 실패: {}", e.getMessage());
+                return false;
+            }
+            Thread.sleep(1500);
 
-                if (alertText.contains("구매하시겠습니까") || alertText.contains("구매")) {
+            // 4. 구매 확인 알럿창 처리 (confirm)
+            try {
+                // JS로 confirm 창을 자동으로 수락하도록 미리 설정
+                js.executeScript("window.confirm = function() { return true; };");
+                js.executeScript("window.alert = function() { return true; };");
+                
+                // 그럼에도 실제 알럿이 뜬 경우 처리
+                try {
+                    webDriverWait.until(ExpectedConditions.alertIsPresent());
+                    Alert alert = webDriver.switchTo().alert();
+                    log.info("알럿 메시지 확인: {}", alert.getText());
                     alert.accept();
-                    log.info("구매 확인 Alert 승인 완료");
-                } else {
-                    log.warn("예상치 못한 Alert: {}", alertText);
-                    alert.accept(); // 일단 승인
-                }
+                    log.info("✅ 구매 확인 알럿 수락 완료");
+                } catch (Exception ignored) {}
             } catch (Exception e) {
-                log.warn("Alert 처리 중 오류 발생 (계속 진행): {}", e.getMessage());
+                log.warn("알럿창 처리 중 오류 (계속 진행): {}", e.getMessage());
             }
+            Thread.sleep(3000);
 
-            // 5. 결과 확인 대기
-            log.info("구매 결과 확인 대기 중...");
-            Thread.sleep(2000); // 결과 팝업이 나타날 때까지 대기
-
-            // 결과 팝업 확인
-            boolean purchaseSuccess = checkPurchaseResult();
-
-            // 6. 결과 알림 전송
-            if (purchaseSuccess) {
-                // 구매 후 잔액 확인 (iframe 밖으로 나가서 확인)
+            // 5. 최종 결과 확인
+            log.info("4단계: 구매 완료 여부 확인 중...");
+            String pageSource = webDriver.getPageSource();
+            if (pageSource.contains("구매가 완료되었습니다") || pageSource.contains("성공")) {
                 int remainingBalance = getRemainingBalanceAfterPurchase();
-                telegramNotificationService.notifyPurchase5000WonSuccess(remainingBalance);
-                log.info("구매 성공 알림 전송 완료");
+                log.info("✅ 로또 구매 성공! (잔액: {}원)", remainingBalance);
+                telegramNotificationService.sendMessage(String.format("✅ 로또 5,000원 구매 완료! (잔액: %,d원)", remainingBalance));
+                return true;
             } else {
-                String failureReason = getPurchaseFailureReason();
-                telegramNotificationService.notifyPurchaseFailure(failureReason);
-                log.error("구매 실패 알림 전송: {}", failureReason);
+                log.error("❌ 구매 결과 확인 실패. 페이지에 '구매 완료' 문구가 없습니다.");
+                telegramNotificationService.sendMessage("🚨 구매 완료 확인 실패: 결과 페이지 문구를 찾을 수 없습니다.");
+                return false;
             }
-
-            // 7. 브라우저 종료
-            log.info("브라우저를 종료합니다.");
-            webDriver.quit();
-
-            return purchaseSuccess;
 
         } catch (Exception e) {
-            log.error("로또 구매 중 오류 발생: {}", e.getMessage(), e);
-            telegramNotificationService.notifyError("로또 구매 중 오류가 발생했습니다: " + e.getMessage(), e);
-            
-            // 오류 발생 시에도 브라우저 종료
-            try {
-                webDriver.quit();
-            } catch (Exception quitException) {
-                log.error("브라우저 종료 중 오류: {}", quitException.getMessage());
-            }
-            
+            log.error("❌ 로또 구매 과정 중 치명적 오류 발생: {}", e.getMessage());
+            telegramNotificationService.notifyError("로또 구매 과정 중 오류가 발생했습니다", e);
             return false;
+        } finally {
+            if (webDriver != null) {
+                log.info("브라우저를 종료합니다.");
+                webDriver.quit();
+            }
         }
     }
 

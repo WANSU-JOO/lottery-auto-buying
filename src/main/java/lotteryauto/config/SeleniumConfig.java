@@ -32,8 +32,16 @@ public class SeleniumConfig {
 
         ChromeOptions options = new ChromeOptions();
         
-        // Headless 모드 필수 (GitHub Actions에는 디스플레이가 없음)
-        options.addArguments("--headless=new");
+        // 환경 변수 LOTTO_HEADLESS가 false이면 브라우저를 화면에 띄움
+        String headlessEnv = System.getenv("LOTTO_HEADLESS");
+        boolean isHeadless = headlessEnv == null || !headlessEnv.equalsIgnoreCase("false");
+
+        if (isHeadless) {
+            options.addArguments("--headless=new");
+            log.info("Chrome WebDriver를 Headless 모드로 초기화합니다.");
+        } else {
+            log.info("Chrome WebDriver를 일반 모드(브라우저 가시화)로 초기화합니다.");
+        }
         
         // Linux 환경 최적화
         options.addArguments("--no-sandbox");
