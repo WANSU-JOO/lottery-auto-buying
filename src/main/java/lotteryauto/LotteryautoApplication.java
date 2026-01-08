@@ -41,9 +41,6 @@ public class LotteryautoApplication implements CommandLineRunner {
 				return;
 			}
 
-			// 시스템 시작 알림
-			telegramNotificationService.notifySystemStart();
-
 			// 1. 로그인
 			log.info("[1/3] 로그인 프로세스 시작...");
 			boolean loginSuccess = lottoService.login();

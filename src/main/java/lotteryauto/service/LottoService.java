@@ -47,10 +47,47 @@ public class LottoService {
             // 1. 로그인 페이지로 이동
             log.info("로그인 페이지로 이동: {}", LOGIN_URL);
             webDriver.get(LOGIN_URL);
-            webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.id("loginForm")));
+            
+            // 페이지 로드 완료 대기
+            webDriverWait.until(ExpectedConditions.presenceOfElementLocated(By.tagName("body")));
+            Thread.sleep(2000); // 추가 대기 (스크립트 로드)
+            
+            // jQuery와 스크립트가 로드될 때까지 대기
+            try {
+                JavascriptExecutor js = (JavascriptExecutor) webDriver;
+                // jQuery가 로드될 때까지 대기
+                for (int i = 0; i < 10; i++) {
+                    Object jQueryLoaded = js.executeScript("return typeof jQuery !== 'undefined'");
+                    if (Boolean.TRUE.equals(jQueryLoaded)) {
+                        log.info("jQuery 로드 완료");
+                        break;
+                    }
+                    Thread.sleep(500);
+                }
+            } catch (Exception e) {
+                log.debug("jQuery 로드 확인 실패, 계속 진행: {}", e.getMessage());
+            }
+            
+            // 로그인 폼과 입력 필드가 나타날 때까지 대기
+            log.info("로그인 폼 대기 중...");
+            webDriverWait.until(
+                    ExpectedConditions.presenceOfElementLocated(By.id("loginForm"))
+            );
+            log.info("로그인 폼을 찾았습니다.");
+            
+            // 로그인 입력 필드 확인
+            WebElement userIdInput = webDriverWait.until(
+                    ExpectedConditions.presenceOfElementLocated(By.id("inpUserId"))
+            );
+            log.info("로그인 입력 필드(inpUserId)를 찾았습니다.");
 
             // 2. 팝업 닫기 처리
             closeAllPopups();
+            
+            // 팝업 닫은 후 입력 필드 다시 확인
+            userIdInput = webDriverWait.until(
+                    ExpectedConditions.presenceOfElementLocated(By.id("inpUserId"))
+            );
 
             // 3. RSA 모듈러스 가져오기 (암호화를 위해 필요)
             waitForRsaModulus();
@@ -66,9 +103,6 @@ public class LottoService {
             }
 
             log.info("로그인 정보 입력 중...");
-            WebElement userIdInput = webDriverWait.until(
-                    ExpectedConditions.presenceOfElementLocated(By.id("inpUserId"))
-            );
             WebElement passwordInput = webDriver.findElement(By.id("inpUserPswdEncn"));
 
             userIdInput.clear();
