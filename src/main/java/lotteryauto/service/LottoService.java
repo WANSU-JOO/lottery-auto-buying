@@ -3,16 +3,14 @@ package lotteryauto.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import lotteryauto.config.LotteryConfig;
-import org.openqa.selenium.By;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
+import org.openqa.selenium.*;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 로또 자동 구매 서비스
@@ -98,23 +96,10 @@ public class LottoService {
             );
             log.info("로그인 액션 실행 완료");
 
-            // 8. 로그인 완료 대기 (페이지 이동 및 세션 쿠키 저장 시간 확보)
-            log.info("로그인 처리 대기 중...");
-            try {
-                // 로그아웃 버튼이 나타날 때까지 확실히 대기 (최대 15초)
-                webDriverWait.until(ExpectedConditions.or(
-                        ExpectedConditions.urlContains("/main"),
-                        ExpectedConditions.urlContains("/mypage"),
-                        ExpectedConditions.presenceOfElementLocated(By.xpath("//a[contains(text(), '로그아웃')]"))
-                ));
-                log.info("로그인 후 페이지 이동 확인 완료");
-                Thread.sleep(3000); // 세션 쿠키 동기화를 위한 추가 대기
-            } catch (Exception e) {
-                log.warn("로그인 후 페이지 이동 대기 중 타임아웃: {}", e.getMessage());
-                Thread.sleep(5000); // 타임아웃 시에도 충분히 대기 후 진행
-            }
+            // 8. 로그인 처리 및 세션 쿠키 저장을 위한 짧은 대기
+            Thread.sleep(2000);
 
-            // 9. 로그인 성공 여부 확인
+            // 9. 로그인 성공 여부 확인 (verifyLogin 내부에서 메인 페이지 이동 및 팝업 처리를 수행함)
             boolean loginSuccess = verifyLogin();
 
             if (loginSuccess) {
@@ -702,6 +687,7 @@ public class LottoService {
             if (!ready) {
                 log.info("표준 방식으로 찾지 못함. JavaScript로 강제 확인 시도...");
                 try {
+                    JavascriptExecutor js = (JavascriptExecutor) webDriver;
                     Object exists = js.executeScript("return document.getElementById('num2') !== null;");
                     if (exists != null && (Boolean) exists) {
                         log.info("✅ JavaScript로 num2 요소 확인 성공!");
@@ -763,24 +749,20 @@ public class LottoService {
             }
             Thread.sleep(1500);
 
-            // 4. 구매 확인 알럿창 처리 (confirm)
+            // 4. 구매 확인 레이어 팝업 처리
+            log.info("4단계: 구매 확인 팝업 승인 중...");
             try {
-                // JS로 confirm 창을 자동으로 수락하도록 미리 설정
-                js.executeScript("window.confirm = function() { return true; };");
-                js.executeScript("window.alert = function() { return true; };");
-                
-                // 그럼에도 실제 알럿이 뜬 경우 처리
-                try {
-                    webDriverWait.until(ExpectedConditions.alertIsPresent());
-                    Alert alert = webDriver.switchTo().alert();
-                    log.info("알럿 메시지 확인: {}", alert.getText());
-                    alert.accept();
-                    log.info("✅ 구매 확인 알럿 수락 완료");
-                } catch (Exception ignored) {}
+                // 사용자 피드백: 레이어 팝업의 '확인' 버튼 클릭 함수 직접 실행
+                js.executeScript("if (typeof closepopupLayerConfirm === 'function') { closepopupLayerConfirm(true); }");
+                log.info("✅ 구매 확인 함수(closepopupLayerConfirm) 실행 완료");
             } catch (Exception e) {
-                log.warn("알럿창 처리 중 오류 (계속 진행): {}", e.getMessage());
+                log.warn("구매 확인 함수 실행 중 오류 (무시하고 계속 진행): {}", e.getMessage());
+                // 만약 위 함수가 없거나 실패할 경우를 대비해 표준 confirm 수락도 시도
+                try {
+                    js.executeScript("window.confirm = function() { return true; };");
+                } catch (Exception ignored) {}
             }
-            Thread.sleep(3000);
+            Thread.sleep(3000); // 구매 처리 완료를 위해 충분히 대기
 
             // 5. 최종 결과 확인
             log.info("4단계: 구매 완료 여부 확인 중...");
