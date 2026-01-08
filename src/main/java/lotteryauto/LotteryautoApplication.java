@@ -70,6 +70,8 @@ public class LotteryautoApplication implements CommandLineRunner {
 				log.info("========================================");
 				log.info("모든 프로세스가 성공적으로 완료되었습니다.");
 				log.info("========================================");
+				// 작업 완료 후 프로세스 강제 종료 (GitHub Actions가 즉시 완료되도록 함)
+				System.exit(0);
 			} else {
 				log.error("[3/3] 로또 구매 실패");
 				log.error("========================================");
